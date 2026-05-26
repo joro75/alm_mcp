@@ -366,7 +366,7 @@ def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> i
 
     # Fetch the list with minimal columns — tag and id are always top-level fields
     proj = _encode_project(project_name)
-    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('tag')}", token)
+    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('Tag')}", token)
     if result.get("error"):
         return None
 
@@ -695,7 +695,7 @@ def get_requirement_types(project_name: str = "") -> str:
 
     proj = _encode_project(project_name)
     # Fetch with minimal columns — requirementType is a top-level field, always included
-    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('tag')}", token)
+    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('Tag')}", token)
     if result.get("error"):
         return _friendly_error(result, "get requirement types")
 
@@ -1041,7 +1041,8 @@ def search_requirements(project_name: str = "", search_text: str = "") -> str:
 
     proj = _encode_project(project_name)
     # Use the filter/search query parameter
-    qs = f"?search={urllib.parse.quote(search_text)}"
+    query = f"Summary CONTAINS '{search_text}' OR Description CONTAINS '{search_text}'"
+    qs = f"?search={urllib.parse.quote(query)}"
     result = _request(f"{proj}/requirements{qs}", token)
     if result.get("error"):
         return _friendly_error(result, "search requirements")
