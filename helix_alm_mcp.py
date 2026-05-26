@@ -366,7 +366,7 @@ def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> i
 
     # Fetch the list with minimal columns — tag and id are always top-level fields
     proj = _encode_project(project_name)
-    result = _request(f"{proj}/requirements?columns={urllib.parse.quote('Tag')}", token)
+    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('tag')}", token)
     if result.get("error"):
         return None
 
@@ -630,9 +630,9 @@ def list_requirements(project_name: str = "", columns: str = "", filter_name: st
     proj = _encode_project(project_name)
     params = []
     if columns:
-        params.append(f"columns={urllib.parse.quote(columns)}")
+        params.append(f"fields={urllib.parse.quote(columns)}")
     if filter_name:
-        params.append(f"filter={urllib.parse.quote(filter_name)}")
+        params.append(f"filterID={urllib.parse.quote(filter_name)}")
     qs = ("?" + "&".join(params)) if params else ""
 
     result = _request(f"{proj}/requirements{qs}", token)
@@ -695,7 +695,7 @@ def get_requirement_types(project_name: str = "") -> str:
 
     proj = _encode_project(project_name)
     # Fetch with minimal columns — requirementType is a top-level field, always included
-    result = _request(f"{proj}/requirements?columns={urllib.parse.quote('Tag')}", token)
+    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('tag')}", token)
     if result.get("error"):
         return _friendly_error(result, "get requirement types")
 
@@ -1041,7 +1041,7 @@ def search_requirements(project_name: str = "", search_text: str = "") -> str:
 
     proj = _encode_project(project_name)
     # Use the filter/search query parameter
-    qs = f"?searchText={urllib.parse.quote(search_text)}"
+    qs = f"?search={urllib.parse.quote(search_text)}"
     result = _request(f"{proj}/requirements{qs}", token)
     if result.get("error"):
         return _friendly_error(result, "search requirements")
