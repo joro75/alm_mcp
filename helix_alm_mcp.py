@@ -147,6 +147,7 @@ mcp = FastMCP(
         "- 'show/list my issues' → list_issues\n"
         "- 'find issues about X' → search_issues\n"
         "- 'show me issue IS-123' → get_issue\n"
+        "- 'what can I do with this issue' → get_issue_workflow_events\n"
         "- 'what priority/status/category values can I use' → get_field_values\n"
         "- 'show/list my test cases' → list_test_cases\n"
         "- 'find test cases about X' → search_test_cases\n"
@@ -445,6 +446,32 @@ def _resolve_issue_id(project_name: str, token: str, identifier: str) -> int | N
             return int(identifier)
 
     return None
+
+
+def _format_workflow_events(data: dict) -> list:
+    """Format workflow events from the Helix ALM API response."""
+    events_list = []
+    events = data.get("events")
+    if isinstance(events, dict):
+        events_list = events.get("eventsData", [])
+    else:
+        events_list = data.get("eventsData", [])
+
+    if isinstance(events_list, list):
+        formatted_events = []
+        for event in events_list:
+            entry = {"name": event.get("name", "")}
+            fields = event.get("fields", [])
+            if fields:
+                entry["fields"] = {
+                    f.get("label", "").lower().replace(" ", "_"): _get_field(fields, f.get("label", ""))
+                    for f in fields
+                    if f.get("label")
+                }
+            formatted_events.append(entry)
+        return formatted_events
+
+    return []
 
 
 def _resolve_test_case_id(project_name: str, token: str, identifier: str) -> int | None:
@@ -773,6 +800,11 @@ def get_requirement(project_name: str = "", requirement_identifier: str = "") ->
     for f in req.get("fields", []):
         all_fields[f["label"]] = _get_field(req["fields"], f["label"])
     summary["all_fields"] = all_fields
+
+    formatted_events = _format_workflow_events(req)
+    if formatted_events:
+        summary["events"] = formatted_events
+
     return json.dumps(summary, indent=2)
 
 
@@ -807,6 +839,11 @@ def get_issue(project_name: str = "", issue_identifier: str = "") -> str:
     for f in issue.get("fields", []):
         all_fields[f["label"]] = _get_field(issue["fields"], f["label"])
     summary["all_fields"] = all_fields
+
+    formatted_events = _format_workflow_events(issue)
+    if formatted_events:
+        summary["events"] = formatted_events
+
     return json.dumps(summary, indent=2)
 
 
@@ -1278,35 +1315,53 @@ def get_requirement_workflow_events(project_name: str = "", requirement_identifi
         return f"Error: Could not find requirement '{requirement_identifier}'."
 
     proj = _encode_project(project_name)
-    result = _request(f"{proj}/requirements/{req_id}/availableEvents", token)
+    result = _request(f"{proj}/requirements/{req_id}/events", token)
     if result.get("error"):
         return _friendly_error(result, "get workflow events for the requirement")
 
-    data = result["data"]
-    events_list = []
-    events = data.get("events")
-    if isinstance(events, dict):
-        events_list = events.get("eventsData", [])
-    if isinstance(events_list, list):
-        formatted_events = []
-        for event in events_list:
-            entry = {"name": event.get("name", "")}
-            fields = event.get("fields", [])
-            if fields:
-                entry["fields"] = {
-                    f.get("label", ""): _get_field(fields, f.get("label", ""))
-                    for f in fields
-                    if f.get("label")
-                }
-            formatted_events.append(entry)
+    formatted_events = _format_workflow_events(result["data"])
+    if formatted_events is not None:
         return json.dumps({
             "requirement": requirement_identifier,
             "available_events": formatted_events,
             "count": len(formatted_events),
         }, indent=2)
+    else:
+        return json.dumps(result["data"], indent=2)
 
-    return json.dumps(data, indent=2)
+@mcp.tool()
+def get_issue_workflow_events(project_name: str = "", issue_identifier: str = "") -> str:
+    """Get the available workflow events for an issue.
 
+    Args:
+        project_name: Name of the Helix ALM project. Uses the default project if not specified.
+        issue_identifier: The issue tag (e.g. 'IS-1960') or numeric ID.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+
+    issue_id = _resolve_issue_id(project_name, token, issue_identifier)
+    if issue_id is None:
+        return f"Error: Could not find issue '{issue_identifier}'."
+
+    proj = _encode_project(project_name)
+    result = _request(f"{proj}/issues/{issue_id}/events", token)
+    if result.get("error"):
+        return _friendly_error(result, "get workflow events for the issue")
+
+    formatted_events = _format_workflow_events(result["data"])
+    if formatted_events is not None:
+        return json.dumps({
+            "issue": issue_identifier,
+            "available_events": formatted_events,
+            "count": len(formatted_events),
+        }, indent=2)
+    else:
+        return json.dumps(result["data"], indent=2)
 
 # --- Test Case MCP Tools ---
 

@@ -169,6 +169,7 @@ and description "The system must support SAML 2.0 SSO for all users."
 | `list_issues` | List issues in a project (supports column selection and saved filters) |
 | `get_issue` | Get full details of a single issue by tag or numeric ID |
 | `add_issue_event` | Trigger a workflow event on an issue (e.g. `Comment`) |
+| `get_issue_workflow_events` | List the workflow events currently available for an issue |
 | `search_issues` | Full-text search across Summary and Description fields |
 
 ---

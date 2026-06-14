@@ -50,7 +50,7 @@ Most tools call `_get_token(project_name)` first, which hits `{project}/token` t
 |-------|---------------|-------|
 | Configuration | `configure_helix_alm`, `configure_azure_devops`, `get_connection_status` | ~294–427 |
 | Requirements | `list_projects`, `list_requirements`, `get_requirement`, `create_requirement`, `update_requirement`, `delete_requirement`, `add_requirement_event`, `search_requirements`, `get_requirement_workflow_events`, `get_requirement_types` | ~431–793 |
-| Issues | `list_issues`, `get_issue`, `add_issue_event`, `search_issues` | ~431–793 |
+| Issues | `list_issues`, `get_issue`, `get_issue_workflow_events`, `add_issue_event`, `search_issues` | ~431–793 |
 | Test Cases | `create_test_case`, `get_test_case`, `update_test_case`, `link_test_case_to_requirement` | ~795–1157 |
 | Documents | `list_documents`, `create_document`, `get_document_tree`, `get_document_node_children`, `add_to_document_tree`, `add_to_document_tree_top_level`, `get_document_requirements` | ~1237–1580 |
 | Automation | `list_automation_suites`, `create_automation_suite`, `get_automation_suite`, `submit_automation_build`, `submit_automation_results_simple`, `list_automation_builds` | ~1583–1828 |
