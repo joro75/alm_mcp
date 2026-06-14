@@ -411,22 +411,23 @@ def _resolve_issue_id(project_name: str, token: str, identifier: str) -> int | N
     """
     identifier = identifier.strip()
 
-    # If it's purely numeric, try it as a direct ID first
-    if identifier.isdigit():
-        proj = _encode_project(project_name)
-        result = _request(f"{proj}/issues/{identifier}", token)
-        if not result.get("error"):
-            return int(identifier)
+    # The lookup of the issue purely based on the number could be problematic
+    # as the ID (the recordID) and the number of the issue do not have to be the same.
+    # And it thus is clear if an recordID or a issue number is being passed.
 
-    # Fetch the list with minimal columns — tag and id are always top-level fields
     proj = _encode_project(project_name)
     numeric_suffix = identifier.split("-", 1)[1] if "-" in identifier else identifier
-    query = f"Tag CONTAINS '{numeric_suffix}'"
+    # Searching on the Tag is not possible as an Issue has no end-user visible tag.
+    # So we search on the number.
+    query = f"NUMBER EQUALS '{numeric_suffix}'"
     qs = f"search={urllib.parse.quote(query)}"
+    # Fetch the list with minimal columns — tag and id are always top-level fields
     result = _request(f"{proj}/issues?fields={urllib.parse.quote('Tag')}&{qs}", token)
     if result.get("error"):
         return None
 
+    # However the tag is being returned, so we still use that to match the identifier,
+    # as the user may have provided a tag instead of a number.
     for issue in result["data"].get("issues", []):
         if issue.get("tag", "").upper() == identifier.upper():
             return issue["id"]
@@ -434,6 +435,14 @@ def _resolve_issue_id(project_name: str, token: str, identifier: str) -> int | N
         tag = issue.get("tag", "")
         if "-" in tag and tag.split("-", 1)[1] == numeric_suffix:
             return issue["id"]
+
+    # If we still didn't find it, and if it is purely numeric,
+    # try it as a direct ID.
+    if identifier.isdigit():
+        proj = _encode_project(project_name)
+        result = _request(f"{proj}/issues/{identifier}", token)
+        if not result.get("error"):
+            return int(identifier)
 
     return None
 
@@ -1274,14 +1283,21 @@ def get_requirement_workflow_events(project_name: str = "", requirement_identifi
         return _friendly_error(result, "get workflow events for the requirement")
 
     data = result["data"]
-    events_list = data.get("eventsData", data.get("events", []))
+    events_list = []
+    events = data.get("events")
+    if isinstance(events, dict):
+        events_list = events.get("eventsData", [])
     if isinstance(events_list, list):
         formatted_events = []
         for event in events_list:
             entry = {"name": event.get("name", "")}
             fields = event.get("fields", [])
             if fields:
-                entry["fields"] = [f.get("label", "") for f in fields if f.get("label")]
+                entry["fields"] = {
+                    f.get("label", ""): _get_field(fields, f.get("label", ""))
+                    for f in fields
+                    if f.get("label")
+                }
             formatted_events.append(entry)
         return json.dumps({
             "requirement": requirement_identifier,
