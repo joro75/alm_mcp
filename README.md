@@ -4,6 +4,8 @@
 
 A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that connects Claude (and other MCP-compatible AI assistants) to the [Perforce ALM](https://www.perforce.com/products/helix-alm) (formerly Helix ALM) REST API. It lets you manage requirements, test cases, documents, and automation results directly from a conversation — with optional Azure DevOps integration for pulling CI/CD test results into Perforce ALM.
 
+General Perforce ALM documentation: https://help.perforce.com/helix-alm/helixalm/2026.1.0/restapi/Content/RESTAPI/home-halm-rest-api.htm
+
 ---
 
 ## Features

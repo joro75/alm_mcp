@@ -61,6 +61,7 @@ Most tools call `_get_token(project_name)` first, which hits `{project}/token` t
 - **Test case steps** cannot be added during creation (POST). The server works around this by creating the test case first, then PUTting steps to the `/steps` sub-resource.
 - **Link bodies** use a `parentChildren` structure with `itemType` strings like `"requirements"` and `"testCases"`.
 - The Perforce ALM REST API uses **project-scoped URLs**: `{project_name}/requirements`, `{project_name}/testCases`, etc. Project names are URL-encoded via `_encode_project()`.
+- Official REST API documentation: https://help.perforce.com/helix-alm/helixalm/2026.1.0/rest-api/index.html
 
 ## Environment variables
 
