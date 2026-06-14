@@ -392,6 +392,7 @@ def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> i
     qs = f"search={urllib.parse.quote(query)}"
     result = _request(f"{proj}/requirements?fields={urllib.parse.quote('Tag')}&{qs}", token)
     if result.get("error"):
+        print(f"Error fetching requirement '{identifier}' for project '{project_name}': {result}")
         return None
 
     for req in result["data"].get("requirements", []):
@@ -420,11 +421,12 @@ def _resolve_issue_id(project_name: str, token: str, identifier: str) -> int | N
     numeric_suffix = identifier.split("-", 1)[1] if "-" in identifier else identifier
     # Searching on the Tag is not possible as an Issue has no end-user visible tag.
     # So we search on the number.
-    query = f"NUMBER EQUALS '{numeric_suffix}'"
+    query = f"NUMBER EQUALS {numeric_suffix}"
     qs = f"search={urllib.parse.quote(query)}"
     # Fetch the list with minimal columns — tag and id are always top-level fields
     result = _request(f"{proj}/issues?fields={urllib.parse.quote('Tag')}&{qs}", token)
     if result.get("error"):
+        print(f"Error fetching issues '{identifier}' for project '{project_name}': {result}")
         return None
 
     # However the tag is being returned, so we still use that to match the identifier,
