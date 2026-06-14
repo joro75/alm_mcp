@@ -357,6 +357,8 @@ def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> i
     Users typically reference requirements by tag, but the API uses internal IDs.
     Optimized to minimize payload by requesting only the Tag column.
     """
+    identifier = identifier.strip()
+
     # If it's purely numeric, try it as a direct ID first
     if identifier.isdigit():
         proj = _encode_project(project_name)
@@ -366,7 +368,10 @@ def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> i
 
     # Fetch the list with minimal columns — tag and id are always top-level fields
     proj = _encode_project(project_name)
-    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('Tag')}", token)
+    numeric_suffix = identifier.split("-", 1)[1] if "-" in identifier else identifier
+    query = f"Tag CONTAINS '{numeric_suffix}'"
+    qs = f"search={urllib.parse.quote(query)}"
+    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('Tag')}&{qs}", token)
     if result.get("error"):
         return None
 
@@ -375,7 +380,7 @@ def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> i
             return req["id"]
         # Also match just the number part (e.g. "1960" matches "BR-1960")
         tag = req.get("tag", "")
-        if "-" in tag and tag.split("-", 1)[1] == identifier:
+        if "-" in tag and tag.split("-", 1)[1] == numeric_suffix:
             return req["id"]
 
     return None
