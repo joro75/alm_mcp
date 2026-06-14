@@ -2,7 +2,7 @@
 Helix ALM MCP Server - Requirements and Document Management
 
 An MCP server that connects to the Helix ALM REST API to create, read,
-update, and manage requirements and requirement documents.
+update, and manage requirements, requirement documents, test cases, automation suites and issues.
 """
 
 import json
@@ -144,6 +144,9 @@ mcp = FastMCP(
         "- 'approve/reject/comment on a requirement' → add_requirement_event\n"
         "- 'what can I do with this requirement' → get_requirement_workflow_events\n"
         "- 'what types of requirements are there' → get_requirement_types\n"
+        "- 'show/list my issues' → list_issues\n"
+        "- 'find issues about X' → search_issues\n"
+        "- 'show me issue IS-123' → get_issue\n"
         "- 'what priority/status/category values can I use' → get_field_values\n"
         "- 'show/list my test cases' → list_test_cases\n"
         "- 'find test cases about X' → search_test_cases\n"
@@ -336,6 +339,21 @@ def _format_requirement(req: dict) -> dict:
     return summary
 
 
+def _format_issue(issue: dict) -> dict:
+    """Format an issue into a readable summary."""
+    fields = issue.get("fields", [])
+    summary = {
+        "id": issue.get("id"),
+        "tag": issue.get("tag", ""),
+    }
+    for label in ["Summary", "Description", "Priority", "Status",
+                  "Currently Assigned To", "Type", "Category"]:
+        val = _get_field(fields, label)
+        if val is not None:
+            summary[label.lower().replace(" ", "_")] = val
+    return summary
+
+
 def _format_test_case(tc: dict) -> dict:
     """Format a test case into a readable summary."""
     fields = tc.get("fields", [])
@@ -382,6 +400,40 @@ def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> i
         tag = req.get("tag", "")
         if "-" in tag and tag.split("-", 1)[1] == numeric_suffix:
             return req["id"]
+
+    return None
+
+
+def _resolve_issue_id(project_name: str, token: str, identifier: str) -> int | None:
+    """Resolve an issue tag (e.g. 'IS-1960') or numeric ID to the internal API id.
+
+    Optimized to minimize payload by requesting only the Tag column.
+    """
+    identifier = identifier.strip()
+
+    # If it's purely numeric, try it as a direct ID first
+    if identifier.isdigit():
+        proj = _encode_project(project_name)
+        result = _request(f"{proj}/issues/{identifier}", token)
+        if not result.get("error"):
+            return int(identifier)
+
+    # Fetch the list with minimal columns — tag and id are always top-level fields
+    proj = _encode_project(project_name)
+    numeric_suffix = identifier.split("-", 1)[1] if "-" in identifier else identifier
+    query = f"Tag CONTAINS '{numeric_suffix}'"
+    qs = f"search={urllib.parse.quote(query)}"
+    result = _request(f"{proj}/issues?fields={urllib.parse.quote('Tag')}&{qs}", token)
+    if result.get("error"):
+        return None
+
+    for issue in result["data"].get("issues", []):
+        if issue.get("tag", "").upper() == identifier.upper():
+            return issue["id"]
+        # Also match just the number part (e.g. "1960" matches "IS-1960")
+        tag = issue.get("tag", "")
+        if "-" in tag and tag.split("-", 1)[1] == numeric_suffix:
+            return issue["id"]
 
     return None
 
@@ -650,6 +702,39 @@ def list_requirements(project_name: str = "", columns: str = "", filter_name: st
 
 
 @mcp.tool()
+def list_issues(project_name: str = "", columns: str = "", filter_name: str = "") -> str:
+    """List issues in a Helix ALM project.
+
+    Args:
+        project_name: Name of the Helix ALM project. Uses the default project if not specified.
+        columns: Comma-separated field labels to include (e.g. "Summary,Priority"). Leave empty for defaults.
+        filter_name: Optional saved filter name to apply.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+
+    proj = _encode_project(project_name)
+    params = []
+    if columns:
+        params.append(f"fields={urllib.parse.quote(columns)}")
+    if filter_name:
+        params.append(f"filterID={urllib.parse.quote(filter_name)}")
+    qs = ("?" + "&".join(params)) if params else ""
+
+    result = _request(f"{proj}/issues{qs}", token)
+    if result.get("error"):
+        return _friendly_error(result, "list issues")
+
+    issues = result["data"].get("issues", [])
+    formatted = [_format_issue(issue) for issue in issues]
+    return json.dumps({"count": len(formatted), "issues": formatted}, indent=2)
+
+
+@mcp.tool()
 def get_requirement(project_name: str = "", requirement_identifier: str = "") -> str:
     """Get a single requirement by tag (e.g. 'BR-1960') or internal ID.
 
@@ -678,6 +763,40 @@ def get_requirement(project_name: str = "", requirement_identifier: str = "") ->
     all_fields = {}
     for f in req.get("fields", []):
         all_fields[f["label"]] = _get_field(req["fields"], f["label"])
+    summary["all_fields"] = all_fields
+    return json.dumps(summary, indent=2)
+
+
+@mcp.tool()
+def get_issue(project_name: str = "", issue_identifier: str = "") -> str:
+    """Get a single issue by tag (e.g. 'IS-123') or internal ID.
+
+    Args:
+        project_name: Name of the Helix ALM project. Uses the default project if not specified.
+        issue_identifier: The issue tag (e.g. 'IS-123') or numeric ID.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+
+    proj = _encode_project(project_name)
+
+    issue_id = _resolve_issue_id(project_name, token, issue_identifier)
+    if issue_id is None:
+        return f"Error: Could not find issue '{issue_identifier}'."
+
+    result = _request(f"{proj}/issues/{issue_id}", token)
+    if result.get("error"):
+        return _friendly_error(result, f"get issue '{issue_identifier}'")
+
+    issue = result["data"]
+    summary = _format_issue(issue)
+    all_fields = {}
+    for f in issue.get("fields", []):
+        all_fields[f["label"]] = _get_field(issue["fields"], f["label"])
     summary["all_fields"] = all_fields
     return json.dumps(summary, indent=2)
 
@@ -1030,6 +1149,52 @@ def add_requirement_event(project_name: str = "", requirement_identifier: str = 
 
 
 @mcp.tool()
+def add_issue_event(project_name: str = "", issue_identifier: str = "",
+                    event_name: str = "", notes: str = "") -> str:
+    """Add a workflow event to an issue (e.g. Comment).
+
+    Args:
+        project_name: Name of the Helix ALM project. Uses the default project if not specified.
+        issue_identifier: The issue tag (e.g. 'IS-1960') or numeric ID.
+        event_name: The workflow event name (e.g. "Comment").
+        notes: Optional notes/comments for the event.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+
+    issue_id = _resolve_issue_id(project_name, token, issue_identifier)
+    if issue_id is None:
+        return f"Error: Could not find issue '{issue_identifier}'."
+
+    proj = _encode_project(project_name)
+    event_data = {
+        "eventsData": [{
+            "name": event_name,
+            "fields": [],
+        }]
+    }
+    if notes:
+        event_data["eventsData"][0]["fields"].append({
+            "label": "Notes",
+            "type": "string",
+            "string": notes,
+        })
+
+    result = _request(f"{proj}/issues/{issue_id}/events", token, event_data, "POST")
+    if result.get("error"):
+        return _friendly_error(result, f"add event '{event_name}' to the issue")
+
+    return json.dumps({
+        "message": f"Event '{event_name}' added to issue {issue_identifier}",
+        "data": result.get("data"),
+    }, indent=2)
+
+
+@mcp.tool()
 def search_requirements(project_name: str = "", search_text: str = "") -> str:
     """Search requirements by text across Summary and Description fields.
 
@@ -1055,6 +1220,33 @@ def search_requirements(project_name: str = "", search_text: str = "") -> str:
     reqs = result["data"].get("requirements", [])
     formatted = [_format_requirement(r) for r in reqs]
     return json.dumps({"count": len(formatted), "requirements": formatted}, indent=2)
+
+
+@mcp.tool()
+def search_issues(project_name: str = "", search_text: str = "") -> str:
+    """Search issues by text across Summary and Description fields.
+
+    Args:
+        project_name: Name of the Helix ALM project. Uses the default project if not specified.
+        search_text: Text to search for in issues.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+
+    proj = _encode_project(project_name)
+    query = f"Summary CONTAINS '{search_text}' OR Description CONTAINS '{search_text}'"
+    qs = f"?search={urllib.parse.quote(query)}"
+    result = _request(f"{proj}/issues{qs}", token)
+    if result.get("error"):
+        return _friendly_error(result, "search issues")
+
+    issues = result["data"].get("issues", [])
+    formatted = [_format_issue(issue) for issue in issues]
+    return json.dumps({"count": len(formatted), "issues": formatted}, indent=2)
 
 
 @mcp.tool()

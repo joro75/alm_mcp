@@ -2,15 +2,14 @@
 
 > **Note:** Helix ALM has been rebranded to **Perforce ALM**. This server targets the Perforce ALM (formerly Helix ALM) REST API. Environment variables, tool names, and configuration keys still use the `HELIX_ALM_` prefix for backwards compatibility.
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that connects Claude (and other MCP-compatible AI assistants) to the [Perforce ALM](https://www.perforce.com/products/helix-alm) (formerly Helix ALM) REST API. It lets you manage requirements, test cases, documents, and automation results directly from a conversation — with optional Azure DevOps integration for pulling CI/CD test results into Perforce ALM.
-
-General Perforce ALM documentation: https://help.perforce.com/helix-alm/helixalm/2026.1.0/restapi/Content/RESTAPI/home-halm-rest-api.htm
+A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that connects Claude (and other MCP-compatible AI assistants) to the [Perforce ALM](https://www.perforce.com/products/helix-alm) (formerly Helix ALM) [REST API](https://help.perforce.com/helix-alm/helixalm/2026.1.0/restapi/Content/RESTAPI/home-halm-rest-api.htm). It lets you manage requirements, issues, test cases, documents, and automation results directly from a conversation — with optional Azure DevOps integration for pulling CI/CD test results into Perforce ALM.
 
 ---
 
 ## Features
 
 - **Requirements** — list, search, create, update, delete, and trigger workflow events
+- **Issues** — list, search, read issue details, and trigger workflow events
 - **Test Cases** — list, search, create, read, update, and append steps; link to requirements
 - **Requirement Documents** — browse document trees, add requirements to sections, create snapshots
 - **Automation Suites** — submit test run results (manually, from JUnit/xUnit XML, or from Azure DevOps builds); reference suites by name or ID
@@ -160,6 +159,17 @@ Discover the values currently in use for a specific field on requirements or tes
 Create a functional requirement in "My Project" with summary "User login via SSO"
 and description "The system must support SAML 2.0 SSO for all users."
 ```
+
+---
+
+### Issues
+
+| Tool | Description |
+|------|-------------|
+| `list_issues` | List issues in a project (supports column selection and saved filters) |
+| `get_issue` | Get full details of a single issue by tag or numeric ID |
+| `add_issue_event` | Trigger a workflow event on an issue (e.g. `Comment`) |
+| `search_issues` | Full-text search across Summary and Description fields |
 
 ---
 
