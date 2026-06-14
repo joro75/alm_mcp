@@ -419,25 +419,26 @@ def _resolve_issue_id(project_name: str, token: str, identifier: str) -> int | N
 
     proj = _encode_project(project_name)
     numeric_suffix = identifier.split("-", 1)[1] if "-" in identifier else identifier
-    # Searching on the Tag is not possible as an Issue has no end-user visible tag.
-    # So we search on the number.
-    query = f"NUMBER EQUALS {numeric_suffix}"
-    qs = f"search={urllib.parse.quote(query)}"
-    # Fetch the list with minimal columns — tag and id are always top-level fields
-    result = _request(f"{proj}/issues?fields={urllib.parse.quote('Tag')}&{qs}", token)
-    if result.get("error"):
-        print(f"Error fetching issues '{identifier}' for project '{project_name}': {result}")
-        return None
+    if numeric_suffix.isdigit():
+        # Searching on the Tag is not possible as an Issue has no end-user visible tag.
+        # So we search on the number.
+        query = f"Number EQUALS {numeric_suffix}"
+        qs = f"search={urllib.parse.quote(query)}"
+        # Fetch the list with minimal columns — tag and id are always top-level fields
+        result = _request(f"{proj}/issues?{qs}", token)
+        if result.get("error"):
+            print(f"Error fetching issues '{identifier}' for project '{project_name}': {result}")
+            return None
 
-    # However the tag is being returned, so we still use that to match the identifier,
-    # as the user may have provided a tag instead of a number.
-    for issue in result["data"].get("issues", []):
-        if issue.get("tag", "").upper() == identifier.upper():
-            return issue["id"]
-        # Also match just the number part (e.g. "1960" matches "IS-1960")
-        tag = issue.get("tag", "")
-        if "-" in tag and tag.split("-", 1)[1] == numeric_suffix:
-            return issue["id"]
+        # However the tag is being returned, so we still use that to match the identifier,
+        # as the user may have provided a tag instead of a number.
+        for issue in result["data"].get("issues", []):
+            if issue.get("tag", "").upper() == identifier.upper():
+                return issue["id"]
+            # Also match just the number part (e.g. "1960" matches "IS-1960")
+            tag = issue.get("tag", "")
+            if "-" in tag and tag.split("-", 1)[1] == numeric_suffix:
+                return issue["id"]
 
     # If we still didn't find it, and if it is purely numeric,
     # try it as a direct ID.
