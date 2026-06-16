@@ -793,7 +793,7 @@ def get_requirement(project_name: str = "", requirement_identifier: str = "") ->
         return f"Error: Could not find requirement '{requirement_identifier}'."
 
     proj = _encode_project(project_name)
-    result = _request(f"{proj}/requirements/{req_id}", token)
+    result = _request(f"{proj}/requirements/{req_id}?expand=events,links", token)
     if result.get("error"):
         return _friendly_error(result, f"get requirement '{requirement_identifier}'")
 
@@ -832,7 +832,7 @@ def get_issue(project_name: str = "", issue_identifier: str = "") -> str:
     if issue_id is None:
         return f"Error: Could not find issue '{issue_identifier}'."
 
-    result = _request(f"{proj}/issues/{issue_id}", token)
+    result = _request(f"{proj}/issues/{issue_id}?expand=events,links", token)
     if result.get("error"):
         return _friendly_error(result, f"get issue '{issue_identifier}'")
 
