@@ -1567,7 +1567,7 @@ def get_test_case(
         return f"Error: Could not find test case '{test_case_identifier}'."
 
     proj = _encode_project(project_name)
-    result = _request(f"{proj}/testCases/{tc_id}", token)
+    result = _request(f"{proj}/testCases/{tc_id}?expand=events,links", token)
     if result.get("error"):
         return _friendly_error(result, "retrieve the test case")
 
@@ -1593,6 +1593,14 @@ def get_test_case(
             all_fields[label] = val
     summary["all_fields"] = all_fields
 
+    formatted_events = _format_workflow_events(tc)
+    if formatted_events:
+        summary["events"] = formatted_events
+
+    formatted_links = _format_links(tc)
+    if formatted_links:
+        summary["linked_items"] = formatted_links
+
     # Fetch steps from the sub-resource
     steps_result = _request(f"{proj}/testCases/{tc_id}/steps", token)
     if not steps_result.get("error") and steps_result.get("data"):
@@ -1616,10 +1624,6 @@ def get_test_case(
     else:
         summary["steps"] = []
         summary["step_count"] = 0
-
-    formatted_links = _format_links(tc)
-    if formatted_links:
-        summary["linked_items"] = formatted_links
 
     return json.dumps(summary, indent=2)
 
