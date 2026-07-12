@@ -522,6 +522,48 @@ def _format_links(data: dict) -> list:
     return formatted_links
 
 
+def _format_documents(req: dict) -> list:
+    """Format document usage data from a Helix ALM requirement response."""
+    documents_data = req.get("documents", {}).get("documentsData", [])
+    if not isinstance(documents_data, list):
+        return []
+
+    formatted_documents = []
+    for document in documents_data:
+        entry = {
+            "documentID": document.get("documentID"),
+            "snapshots": [],
+        }
+
+        snapshots = document.get("snapshots", [])
+        if isinstance(snapshots, list):
+            for snapshot in snapshots:
+                snapshot_entry = {
+                    "documentName": snapshot.get("documentName", ""),
+                    "link": snapshot.get("link", ""),
+                    "version": snapshot.get("version"),
+                    "snapshot": snapshot.get("snapshot"),
+                    "locations": [],
+                }
+
+                locations = snapshot.get("locations", [])
+                if isinstance(locations, list):
+                    snapshot_entry["locations"] = [
+                        {
+                            "link": location.get("link", ""),
+                            "outline": location.get("outline", ""),
+                            "nodeID": location.get("nodeID"),
+                        }
+                        for location in locations
+                    ]
+
+                entry["snapshots"].append(snapshot_entry)
+
+        formatted_documents.append(entry)
+
+    return formatted_documents
+
+
 def _resolve_test_case_id(project_name: str, token: str, identifier: str) -> int | None:
     """Resolve a test case tag (e.g. 'TC-42') or numeric ID to the internal API id.
 
@@ -838,7 +880,7 @@ def get_requirement(project_name: str = "", requirement_identifier: str = "") ->
         return f"Error: Could not find requirement '{requirement_identifier}'."
 
     proj = _encode_project(project_name)
-    result = _request(f"{proj}/requirements/{req_id}?expand=events,links", token)
+    result = _request(f"{proj}/requirements/{req_id}?expand=events,links,documents", token)
     if result.get("error"):
         return _friendly_error(result, f"get requirement '{requirement_identifier}'")
 
@@ -856,6 +898,10 @@ def get_requirement(project_name: str = "", requirement_identifier: str = "") ->
     formatted_links = _format_links(req)
     if formatted_links:
         summary["linked_items"] = formatted_links
+
+    formatted_documents = _format_documents(req)
+    if formatted_documents:
+        summary["documents"] = formatted_documents
 
     return json.dumps(summary, indent=2)
 
