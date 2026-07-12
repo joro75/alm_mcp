@@ -484,6 +484,44 @@ def _format_workflow_events(data: dict) -> list:
     return []
 
 
+def _format_links(data: dict) -> list:
+    """Format link data from a Helix ALM API response into a readable structure."""
+    links_data = data.get("links", {}).get("linksData", [])
+    if not isinstance(links_data, list):
+        return []
+
+    formatted_links = []
+    for link in links_data:
+        link_info = {"link_type": link.get("linkDefinition", {}).get("name", "")}
+        if link.get("type") == "peers":
+            peers = link.get("peers", [])
+            if peers:
+                link_info["peers"] = [
+                    {
+                        "itemType": peer.get("itemType"),
+                        "itemID": peer.get("itemID"),
+                    }
+                    for peer in peers
+                ]
+        elif link.get("type") == "parentChildren":
+            pc = link.get("parentChildren", {})
+            parent = pc.get("parent", {})
+            children = pc.get("children", [])
+            if parent:
+                link_info["parent"] = {
+                    "itemType": parent.get("itemType"),
+                    "itemID": parent.get("itemID"),
+                }
+            if children:
+                link_info["children"] = [
+                    {"itemType": c.get("itemType"), "itemID": c.get("itemID")}
+                    for c in children
+                ]
+        formatted_links.append(link_info)
+
+    return formatted_links
+
+
 def _resolve_test_case_id(project_name: str, token: str, identifier: str) -> int | None:
     """Resolve a test case tag (e.g. 'TC-42') or numeric ID to the internal API id.
 
@@ -815,6 +853,10 @@ def get_requirement(project_name: str = "", requirement_identifier: str = "") ->
     if formatted_events:
         summary["events"] = formatted_events
 
+    formatted_links = _format_links(req)
+    if formatted_links:
+        summary["linked_items"] = formatted_links
+
     return json.dumps(summary, indent=2)
 
 
@@ -853,6 +895,10 @@ def get_issue(project_name: str = "", issue_identifier: str = "") -> str:
     formatted_events = _format_workflow_events(issue)
     if formatted_events:
         summary["events"] = formatted_events
+
+    formatted_links = _format_links(issue)
+    if formatted_links:
+        summary["linked_items"] = formatted_links
 
     return json.dumps(summary, indent=2)
 
@@ -1571,21 +1617,9 @@ def get_test_case(
         summary["steps"] = []
         summary["step_count"] = 0
 
-    # Include links info
-    links_data = tc.get("links", {}).get("linksData", [])
-    if links_data:
-        summary["linked_items"] = []
-        for link in links_data:
-            link_info = {"link_type": link.get("linkDefinition", {}).get("name", "")}
-            if link.get("type") == "parentChildren":
-                pc = link.get("parentChildren", {})
-                parent = pc.get("parent", {})
-                children = pc.get("children", [])
-                if parent:
-                    link_info["parent"] = {"itemType": parent.get("itemType"), "itemID": parent.get("itemID")}
-                if children:
-                    link_info["children"] = [{"itemType": c.get("itemType"), "itemID": c.get("itemID")} for c in children]
-            summary["linked_items"].append(link_info)
+    formatted_links = _format_links(tc)
+    if formatted_links:
+        summary["linked_items"] = formatted_links
 
     return json.dumps(summary, indent=2)
 
