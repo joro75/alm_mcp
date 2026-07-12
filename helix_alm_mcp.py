@@ -307,13 +307,20 @@ def _get_field(fields: list, label: str):
     return None
 
 
+def _build_formatted_string_payload(value: str | None) -> dict:
+    """Build a formatted string payload and mark it as formatted when HTML is present."""
+    text_value = value if value is not None else ""
+    is_formatted = bool(re.search(r"<\/?[A-Za-z][^>]*>", str(text_value)))
+    return {"isFormatted": is_formatted, "text": text_value}
+
+
 def _set_field(fields: list, label: str, value: str) -> bool:
     """Set a field value by label. Returns True if field was found."""
     for f in fields:
         if f.get("label") == label:
             ftype = f.get("type")
             if ftype == "formattedString":
-                f["formattedString"] = {"isFormatted": False, "text": value}
+                f["formattedString"] = _build_formatted_string_payload(value)
             elif ftype == "menuItem":
                 f["menuItem"] = {"label": value}
             elif ftype == "user":
@@ -999,10 +1006,7 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
         body["fields"].append({
             "label": "Description",
             "type": "formattedString",
-            "formattedString": {
-                "isFormatted": False,
-                "text": description,
-            },
+            "formattedString": _build_formatted_string_payload(description),
         })
     if priority:
         body["fields"].append({
@@ -1419,10 +1423,7 @@ def create_test_case(
         body["fields"].append({
             "label": "Description",
             "type": "formattedString",
-            "formattedString": {
-                "isFormatted": False,
-                "text": description,
-            },
+            "formattedString": _build_formatted_string_payload(description),
         })
 
     if priority:
@@ -1637,7 +1638,7 @@ def update_test_case(
         fields_to_update.append({
             "label": "Description",
             "type": "formattedString",
-            "formattedString": {"isFormatted": False, "text": description},
+            "formattedString": _build_formatted_string_payload(description),
         })
     if test_case_type:
         fields_to_update.append({"label": "Type", "type": "menuItem", "menuItem": {"label": test_case_type}})
