@@ -16,7 +16,8 @@ import urllib.parse
 import urllib.error
 import logging
 from time import sleep
-from time import time
+from time import time, mktime
+from datetime import datetime, timezone
 from mcp.server.fastmcp import FastMCP
 
 _REQUEST_MAX_TRIES = 3
@@ -45,6 +46,7 @@ _session = {
     "helix_rate_limit_reset": None,
     "helix_rate_limit_retry_after": None,
     "helix_rate_limit_wait_until": None,
+    "helix_project_tokens": {},
 }
 
 
@@ -69,6 +71,17 @@ def _get_helix_url() -> str:
     if url and not url.endswith("/"):
         url += "/"
     return url
+
+
+def _parse_iso8601_utc(value: str | None) -> float | None:
+    """Parse a UTC ISO-8601 timestamp (e.g. 2018-04-23T17:37:02Z) to epoch seconds."""
+    if not value:
+        return None
+    try:
+        dt = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+    except Exception:
+        return None
 
 
 def _parse_int_header(value):
@@ -347,10 +360,31 @@ def _get_token(project_name: str) -> str | None:
     Returns None if Helix ALM is not configured or token request fails."""
     if not _helix_configured():
         return None
+
+    token_cache = _session.setdefault("helix_project_tokens", {})
+    cached = token_cache.get(project_name)
+    if isinstance(cached, dict):
+        token = cached.get("token")
+        expires_on = cached.get("expires_on")
+        # Reuse the token until shortly before expiry to avoid unnecessary /token calls.
+        if token and isinstance(expires_on, (int, float)) and expires_on - time() > 60:
+            return token
+
     result = _request(f"{_encode_project(project_name)}/token")
     if result.get("error"):
         return None
-    return result["data"].get("accessToken") if result["data"] else None
+
+    data = result["data"] if result.get("data") else {}
+    token = data.get("accessToken") if isinstance(data, dict) else None
+    if not token:
+        return None
+
+    expires_on = _parse_iso8601_utc(data.get("expiresOn") if isinstance(data, dict) else None)
+    token_cache[project_name] = {
+        "token": token,
+        "expires_on": expires_on,
+    }
+    return token
 
 
 # --- Steps helpers ---
@@ -766,6 +800,7 @@ def configure_helix_alm(
     _session["helix_alm_api_key"] = api_key
     _session["helix_alm_api_secret"] = api_secret
     _session["helix_alm_ssl_verify"] = ssl_verify
+    _session["helix_project_tokens"] = {}
     if default_project:
         _session["default_project"] = default_project
 
