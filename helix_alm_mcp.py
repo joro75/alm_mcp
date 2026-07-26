@@ -14,7 +14,11 @@ import xml.etree.ElementTree as ET
 import urllib.request
 import urllib.parse
 import urllib.error
+from time import sleep
+from time import time
 from mcp.server.fastmcp import FastMCP
+
+_REQUEST_MAX_TRIES = 3
 
 # --- Session configuration store ---
 # Credentials are stored in memory only — never written to disk.
@@ -32,6 +36,11 @@ _session = {
     "azdo_org": os.environ.get("AZDO_ORG", ""),
     "azdo_project": os.environ.get("AZDO_PROJECT", ""),
     "azdo_pat": os.environ.get("AZDO_PAT", ""),
+    "helix_rate_limit_limit": None,
+    "helix_rate_limit_remaining": None,
+    "helix_rate_limit_reset": None,
+    "helix_rate_limit_retry_after": None,
+    "helix_rate_limit_wait_until": None,
 }
 
 
@@ -56,6 +65,73 @@ def _get_helix_url() -> str:
     if url and not url.endswith("/"):
         url += "/"
     return url
+
+
+def _parse_int_header(value):
+    """Parse an integer header value and return None when unavailable."""
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _update_rate_limit_state(headers) -> None:
+    """Store Helix ALM rate-limit response headers for the current session.
+
+    The server exposes these headers on normal responses:
+    - X-RateLimit-Limit: current number of requests allowed per 60 seconds
+    - X-RateLimit-Remaining: requests left before rejection
+    - X-RateLimit-Reset: seconds before the limit resets
+    When HTTP 429 is returned, RetryAfter indicates how long to wait before retrying.
+    """
+    limit = _parse_int_header(headers.get("X-RateLimit-Limit"))
+    remaining = _parse_int_header(headers.get("X-RateLimit-Remaining"))
+    reset = _parse_int_header(headers.get("X-RateLimit-Reset"))
+    retry_after = _parse_int_header(headers.get("RetryAfter"))
+
+    if limit is not None:
+        _session["helix_rate_limit_limit"] = limit
+    if remaining is not None:
+        _session["helix_rate_limit_remaining"] = remaining
+    if reset is not None:
+        _session["helix_rate_limit_reset"] = reset
+    if retry_after is not None:
+        _session["helix_rate_limit_retry_after"] = retry_after
+
+    wait_seconds = retry_after if retry_after is not None else reset
+    if isinstance(wait_seconds, int) and wait_seconds > 0:
+        _session["helix_rate_limit_wait_until"] = time() + wait_seconds
+    else:
+        _session["helix_rate_limit_wait_until"] = None
+
+    print(
+        "X-RateLimit state: "
+        f"limit={_session['helix_rate_limit_limit']} "
+        f"remaining={_session['helix_rate_limit_remaining']} "
+        f"reset={_session['helix_rate_limit_reset']} "
+        f"retry_after={_session['helix_rate_limit_retry_after']} "
+        f"wait_until={_session['helix_rate_limit_wait_until']}"
+    )
+
+
+def _rate_limit_wait_seconds() -> int:
+    """Return the number of seconds to wait before the next Helix ALM request."""
+    wait_until = _session.get("helix_rate_limit_wait_until")
+    if isinstance(wait_until, (int, float)):
+        remaining = int(round(wait_until - time()))
+        if remaining > 0:
+            return remaining
+        _session["helix_rate_limit_wait_until"] = None
+    return 0
+
+
+def _maybe_wait_for_rate_limit() -> None:
+    """Pause before a request when the session has already exhausted its quota."""
+    wait_seconds = _rate_limit_wait_seconds()
+    if wait_seconds > 0:
+        sleep(wait_seconds)
 
 
 def _resolve_project(project_name: str) -> str:
@@ -105,6 +181,8 @@ def _friendly_error(result: dict, action: str = "complete this action") -> str:
         msg = f"Could not {action}: the item was not found. Check that the name, tag, or ID is correct."
     elif status == 409:
         msg = f"Could not {action}: there was a conflict — the item may have been modified by someone else."
+    elif status == 429:
+        msg = f"Could not {action}: The user sent too many requests within the rate limiting timeframe."
     elif status == 422:
         msg = f"Could not {action}: the server rejected the data. A required field may be missing or a value may be invalid."
     elif 400 <= status < 500:
@@ -189,41 +267,52 @@ def _request(path: str, access_token: str | None = None,
              body: dict | None = None, method: str | None = None) -> dict:
     """Send a request to the Helix ALM REST API and return parsed JSON."""
     url = _get_helix_url() + path
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", _get_auth_header(access_token))
-
-    if body is not None:
-        req.data = json.dumps(body).encode()
-        req.add_header("Content-Type", "application/json")
-
-    if method is not None:
-        req.method = method
-
     ctx = ssl.create_default_context()
     if not _session["helix_alm_ssl_verify"]:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
 
-    try:
-        resp = urllib.request.urlopen(req, context=ctx)
-        data = resp.read()
-        resp.close()
-        if data:
-            return {"status": resp.status, "data": json.loads(data.decode())}
-        return {"status": resp.status, "data": None}
-    except urllib.error.HTTPError as e:
-        err_body = e.fp.read()
+    last_result = None
+    for attempt in range(1, max(1, _REQUEST_MAX_TRIES) + 1):
+        _maybe_wait_for_rate_limit()
+
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", _get_auth_header(access_token))
+
+        if body is not None:
+            req.data = json.dumps(body).encode()
+            req.add_header("Content-Type", "application/json")
+
+        if method is not None:
+            req.method = method
+
         try:
-            err_data = json.loads(err_body.decode())
-        except Exception:
-            err_data = {"raw": err_body.decode()}
-        return {"status": e.code, "data": err_data, "error": True}
-    except urllib.error.URLError as e:
-        return {"status": 0, "data": None,
-                "error": True, "message": str(e.reason)}
-    except Exception as e:
-        return {"status": 0, "data": None,
-                "error": True, "message": str(e)}
+            resp = urllib.request.urlopen(req, context=ctx)
+            _update_rate_limit_state(resp.headers)
+            data = resp.read()
+            resp.close()
+            if data:
+                return {"status": resp.status, "data": json.loads(data.decode())}
+            return {"status": resp.status, "data": None}
+        except urllib.error.HTTPError as e:
+            _update_rate_limit_state(e.headers)
+            err_body = e.fp.read()
+            try:
+                err_data = json.loads(err_body.decode())
+            except Exception:
+                err_data = {"raw": err_body.decode()}
+            last_result = {"status": e.code, "data": err_data, "error": True}
+            if e.code == 429 and attempt < max(1, _REQUEST_MAX_TRIES):
+                continue
+            return last_result
+        except urllib.error.URLError as e:
+            return {"status": 0, "data": None,
+                    "error": True, "message": str(e.reason)}
+        except Exception as e:
+            return {"status": 0, "data": None,
+                    "error": True, "message": str(e)}
+
+    return last_result if last_result is not None else {"status": 0, "data": None, "error": True, "message": "Request failed."}
 
 
 def _encode_project(project_name: str) -> str:
@@ -739,6 +828,12 @@ def get_connection_status() -> str:
             ),
             "ssl_verify": _session["helix_alm_ssl_verify"],
             "default_project": _session["default_project"] or "(not set)",
+            "rate_limit": {
+                "limit": _session["helix_rate_limit_limit"],
+                "remaining": _session["helix_rate_limit_remaining"],
+                "reset_seconds": _session["helix_rate_limit_reset"],
+                "retry_after_seconds": _session["helix_rate_limit_retry_after"],
+            },
         },
         "azure_devops": {
             "configured": _azdo_configured(),

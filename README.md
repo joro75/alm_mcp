@@ -90,6 +90,17 @@ The server supports two authentication methods:
 
 Credentials set via environment variables are loaded at startup. You can override them at any time by calling `configure_helix_alm` in the conversation.
 
+## Rate limiting
+
+The shared Helix ALM HTTP layer reads and stores the following response headers per session:
+
+- `X-RateLimit-Limit` — current number of requests allowed per 60 seconds
+- `X-RateLimit-Remaining` — requests left before the server rejects new calls
+- `X-RateLimit-Reset` — seconds until the limit resets
+- `RetryAfter` — returned with HTTP 429 responses to indicate when to retry
+
+The server uses this information to pause before subsequent requests when the session is rate-limited. For troubleshooting, `_request` also prints the current `X-RateLimit-*` values to the output stream.
+
 ---
 
 ## Tool reference
