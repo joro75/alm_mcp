@@ -84,6 +84,76 @@ def _parse_iso8601_utc(value: str | None) -> float | None:
         return None
 
 
+def _get_project_menu_cache() -> dict:
+    """Return the per-project menu cache container stored in session state."""
+    return _session.setdefault("helix_project_menus", {})
+
+
+def _load_project_menus(project_name: str, token: str) -> dict | None:
+    """Load and cache the menus for a specific project.
+
+    This is intended to run once after the first successful connection per project.
+    The cache is project-scoped because menu definitions can differ between projects.
+    Each cached menu is logged at INFO together with its items for later reference.
+    """
+    if not project_name or not token:
+        return None
+
+    cache = _get_project_menu_cache()
+    project_cache = cache.get(project_name)
+    if isinstance(project_cache, dict) and project_cache.get("loaded"):
+        return project_cache
+
+    proj = _encode_project(project_name)
+    menus_result = _request(f"{proj}/configs/menus", token)
+    if menus_result.get("error"):
+        return None
+
+    menus_data = menus_result.get("data", {}) if isinstance(menus_result.get("data"), dict) else {}
+    menus = menus_data.get("menus", menus_data.get("menuData", menus_data.get("items", [])))
+    if not isinstance(menus, list):
+        menus = []
+
+    project_cache = {
+        "loaded": True,
+        "menus": {},
+    }
+
+    for menu in menus:
+        menu_id = menu.get("id")
+        menu_label = menu.get("name") or menu.get("label") or menu.get("title") or str(menu_id)
+        if menu_id is None:
+            continue
+
+        items_result = _request(f"{proj}/configs/menus/{menu_id}/items", token)
+        items_data = items_result.get("data", {}) if isinstance(items_result.get("data"), dict) else {}
+        items = items_data.get("items", items_data.get("menuItems", items_data.get("itemsData", [])))
+        if not isinstance(items, list):
+            items = []
+
+        project_cache["menus"][str(menu_id)] = {
+            "menu": menu,
+            "items": items,
+        }
+
+        logger.info("Helix ALM menu cache: project=%s menu=%s items=%s", project_name, menu_label, [
+            item.get("label") or item.get("name") or item.get("value") or item.get("id")
+            for item in items
+        ])
+
+    cache[project_name] = project_cache
+    return project_cache
+
+
+def _ensure_project_menus_loaded(project_name: str, token: str) -> None:
+    """Load project menus once after the first successful connection.
+
+    Callers should use this after a successful connection or when a project token
+    is first obtained, so menu caching is established before field-to-menu lookups.
+    """
+    _load_project_menus(project_name, token)
+
+
 def _parse_int_header(value):
     """Parse an integer header value and return None when unavailable."""
     if value is None:
@@ -821,6 +891,13 @@ def configure_helix_alm(
     if not _session["default_project"] and len(project_names) == 1:
         _session["default_project"] = project_names[0]
 
+    # Load and cache menus once after the first successful connection.
+    # Menus are project-specific, so cache them per project and log their values once.
+    if _session["default_project"]:
+        token = _get_token(_session["default_project"])
+        if token:
+            _ensure_project_menus_loaded(_session["default_project"], token)
+
     response = {
         "status": "connected",
         "url": normalized_url,
@@ -926,6 +1003,9 @@ def set_default_project(project_name: str) -> str:
         }, indent=2)
 
     _session["default_project"] = project_name
+    token = _get_token(project_name)
+    if token:
+        _ensure_project_menus_loaded(project_name, token)
     return json.dumps({
         "message": f"Default project set to '{project_name}'",
         "default_project": project_name,
