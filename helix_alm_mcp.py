@@ -14,11 +14,15 @@ import xml.etree.ElementTree as ET
 import urllib.request
 import urllib.parse
 import urllib.error
+import logging
 from time import sleep
 from time import time
 from mcp.server.fastmcp import FastMCP
 
 _REQUEST_MAX_TRIES = 3
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # --- Session configuration store ---
 # Credentials are stored in memory only — never written to disk.
@@ -100,19 +104,19 @@ def _update_rate_limit_state(headers) -> None:
     if retry_after is not None:
         _session["helix_rate_limit_retry_after"] = retry_after
 
-    wait_seconds = retry_after if retry_after is not None else reset
+    wait_seconds = retry_after
     if isinstance(wait_seconds, int) and wait_seconds > 0:
         _session["helix_rate_limit_wait_until"] = time() + wait_seconds
     else:
         _session["helix_rate_limit_wait_until"] = None
 
-    print(
-        "X-RateLimit state: "
-        f"limit={_session['helix_rate_limit_limit']} "
-        f"remaining={_session['helix_rate_limit_remaining']} "
-        f"reset={_session['helix_rate_limit_reset']} "
-        f"retry_after={_session['helix_rate_limit_retry_after']} "
-        f"wait_until={_session['helix_rate_limit_wait_until']}"
+    logger.info(
+        "X-RateLimit state: limit=%s remaining=%s reset=%s retry_after=%s wait_until=%s",
+        _session["helix_rate_limit_limit"],
+        _session["helix_rate_limit_remaining"],
+        _session["helix_rate_limit_reset"],
+        _session["helix_rate_limit_retry_after"],
+        _session["helix_rate_limit_wait_until"],
     )
 
 
