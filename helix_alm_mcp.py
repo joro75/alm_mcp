@@ -110,7 +110,7 @@ def _load_project_menus(project_name: str, token: str) -> dict | None:
         return None
 
     menus_data = menus_result.get("data", {}) if isinstance(menus_result.get("data"), dict) else {}
-    menus = menus_data.get("menus", menus_data.get("menuData", menus_data.get("items", [])))
+    menus = menus_data.get("menusData", [])
     if not isinstance(menus, list):
         menus = []
 
@@ -121,25 +121,30 @@ def _load_project_menus(project_name: str, token: str) -> dict | None:
 
     for menu in menus:
         menu_id = menu.get("id")
-        menu_label = menu.get("name") or menu.get("label") or menu.get("title") or str(menu_id)
+        menu_label = menu.get("name") or str(menu_id)
         if menu_id is None:
             continue
 
         items_result = _request(f"{proj}/configs/menus/{menu_id}/items", token)
         items_data = items_result.get("data", {}) if isinstance(items_result.get("data"), dict) else {}
-        items = items_data.get("items", items_data.get("menuItems", items_data.get("itemsData", [])))
-        if not isinstance(items, list):
-            items = []
+        itemsList = items_data.get("itemsData", [])
+
+        items = []
+        for item in itemsList:
+            item_entry = {
+                "id": item.get("id"),
+                "label": item.get("label")
+            }
+            items.append(item_entry)
 
         project_cache["menus"][str(menu_id)] = {
             "menu": menu,
             "items": items,
         }
 
-        logger.info("Helix ALM menu cache: project=%s menu=%s items=%s", project_name, menu_label, [
-            item.get("label") or item.get("name") or item.get("value") or item.get("id")
-            for item in items
-        ])
+        logger.info("Helix ALM menu cache: project=%s menu=%s items=%s", project_name, menu_label, 
+                    [ item.get("label") or item.get("id")   for item in items ]
+        )
 
     cache[project_name] = project_cache
     return project_cache
