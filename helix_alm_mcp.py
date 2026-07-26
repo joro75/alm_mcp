@@ -22,7 +22,7 @@ from mcp.server.fastmcp import FastMCP
 _REQUEST_MAX_TRIES = 3
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("helix_alm_mcp")
 
 # --- Session configuration store ---
 # Credentials are stored in memory only — never written to disk.
@@ -89,6 +89,14 @@ def _update_rate_limit_state(headers) -> None:
     - X-RateLimit-Remaining: requests left before rejection
     - X-RateLimit-Reset: seconds before the limit resets
     When HTTP 429 is returned, RetryAfter indicates how long to wait before retrying.
+
+        Timing behavior:
+        - `RetryAfter` is the strongest signal and is used first.
+        - `X-RateLimit-Reset` is only used when `X-RateLimit-Remaining` is 0.
+        - `X-RateLimit-Reset` should be treated as the remaining time until the quota
+            becomes available again, not as a general delay on every response.
+        - The computed delay is stored as an absolute `wait_until` timestamp so that
+            later requests only sleep for the remaining time, not the original full delay.
     """
     limit = _parse_int_header(headers.get("X-RateLimit-Limit"))
     remaining = _parse_int_header(headers.get("X-RateLimit-Remaining"))
@@ -105,6 +113,8 @@ def _update_rate_limit_state(headers) -> None:
         _session["helix_rate_limit_retry_after"] = retry_after
 
     wait_seconds = retry_after
+    if wait_seconds is None and remaining == 0 and isinstance(reset, int) and reset > 0:
+        wait_seconds = reset
     if isinstance(wait_seconds, int) and wait_seconds > 0:
         _session["helix_rate_limit_wait_until"] = time() + wait_seconds
     else:
@@ -121,7 +131,12 @@ def _update_rate_limit_state(headers) -> None:
 
 
 def _rate_limit_wait_seconds() -> int:
-    """Return the number of seconds to wait before the next Helix ALM request."""
+    """Return the number of seconds to wait before the next Helix ALM request.
+
+    This is computed from the stored absolute `wait_until` timestamp so repeated
+    calls do not over-wait. If the wait has already elapsed, the stored timestamp
+    is cleared and zero is returned.
+    """
     wait_until = _session.get("helix_rate_limit_wait_until")
     if isinstance(wait_until, (int, float)):
         remaining = int(round(wait_until - time()))
@@ -132,7 +147,11 @@ def _rate_limit_wait_seconds() -> int:
 
 
 def _maybe_wait_for_rate_limit() -> None:
-    """Pause before a request when the session has already exhausted its quota."""
+    """Pause before a request when the session has already exhausted its quota.
+
+    This is intentionally called inside the retry loop in `_request` so every retry
+    re-evaluates the remaining wait time against the current clock.
+    """
     wait_seconds = _rate_limit_wait_seconds()
     if wait_seconds > 0:
         sleep(wait_seconds)
