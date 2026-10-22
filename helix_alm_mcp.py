@@ -599,6 +599,63 @@ def _format_test_case(tc: dict) -> dict:
     return summary
 
 
+def _user_matches(user: dict, identifier: str) -> bool:
+    """Return whether a Helix user record matches an ID, username, or name."""
+    identifier = identifier.strip().casefold()
+    if not identifier:
+        return False
+    values = [
+        str(user.get("id", "")),
+        user.get("username", ""),
+        " ".join(filter(None, [user.get("firstName", ""), user.get("mi", ""), user.get("lastName", "")])),
+    ]
+    normalized = [str(value).strip().casefold() for value in values if value]
+    if identifier in normalized:
+        return True
+    # Names are often supplied as a first or last name. Accept a component
+    # only when the caller's identifier is an unambiguous name fragment.
+    name_parts = {
+        part.casefold()
+        for key in ("firstName", "mi", "lastName")
+        for part in str(user.get(key, "")).split()
+        if part
+    }
+    return identifier in name_parts
+
+
+def _find_users(value, identifier: str) -> list[dict]:
+    """Find user-shaped objects recursively in an API response."""
+    found = []
+    if isinstance(value, dict):
+        if "id" in value and any(key in value for key in ("username", "firstName", "lastName")):
+            if _user_matches(value, identifier):
+                found.append(value)
+        for child in value.values():
+            found.extend(_find_users(child, identifier))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(_find_users(child, identifier))
+    return found
+
+
+def _resolve_user(project_name: str, token: str, item_path: str, identifier: str) -> dict | None:
+    """Resolve an assignee from the target item's fields and event history."""
+    result = _request(f"{item_path}?expand=events", token)
+    if result.get("error"):
+        return None
+    matches = _find_users(result.get("data"), identifier)
+    unique = {user.get("id"): user for user in matches if user.get("id") is not None}
+    return next(iter(unique.values()), None) if len(unique) == 1 else None
+
+
+def _build_assign_event(user: dict, notes: str) -> dict:
+    if not notes.strip():
+        raise ValueError("notes are required for Assign workflow events")
+    fields = [{"label": "Assign To", "type": "userArray", "userArray": [user]}]
+    fields.append({"label": "Notes", "type": "string", "string": notes})
+    return {"eventsData": [{"name": "Assign", "fields": fields}]}
+
+
 def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> int | None:
     """Resolve a requirement tag (e.g. 'BR-1960') or numeric ID to the internal API id.
 
@@ -1618,6 +1675,85 @@ def add_issue_event(project_name: str = "", issue_identifier: str = "",
         "message": f"Event '{event_name}' added to issue {issue_identifier}",
         "data": result.get("data"),
     }, indent=2)
+
+
+@mcp.tool()
+def assign_issue(project_name: str = "", issue_identifier: str = "",
+                  assignee: str = "", notes: str = "") -> str:
+    """Assign an issue to a Helix user by username, full name, or user ID.
+
+    The user record is resolved from the target item's returned user references.
+    Notes are required by the Helix Assign workflow.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+    issue_id = _resolve_issue_id(project_name, token, issue_identifier)
+    if issue_id is None:
+        return f"Error: Could not find issue '{issue_identifier}'."
+    proj = _encode_project(project_name)
+    user = _resolve_user(project_name, token, f"{proj}/issues/{issue_id}", assignee)
+    if user is None:
+        return f"Error: Could not resolve a unique Helix user matching '{assignee}'."
+    if not notes.strip():
+        return "Error: notes are required when assigning an issue."
+    result = _request(f"{proj}/issues/{issue_id}/events", token, _build_assign_event(user, notes), "POST")
+    if result.get("error"):
+        return _friendly_error(result, f"assign issue '{issue_identifier}'")
+    return json.dumps({"message": f"Issue {issue_identifier} assigned", "assignee": user, "data": result.get("data")}, indent=2)
+
+
+@mcp.tool()
+def assign_requirement(project_name: str = "", requirement_identifier: str = "",
+                         assignee: str = "", notes: str = "") -> str:
+    """Assign a requirement to a Helix user by username, full name, or user ID."""
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+    req_id = _resolve_requirement_id(project_name, token, requirement_identifier)
+    if req_id is None:
+        return f"Error: Could not find requirement '{requirement_identifier}'."
+    proj = _encode_project(project_name)
+    user = _resolve_user(project_name, token, f"{proj}/requirements/{req_id}", assignee)
+    if user is None:
+        return f"Error: Could not resolve a unique Helix user matching '{assignee}'."
+    if not notes.strip():
+        return "Error: notes are required when assigning a requirement."
+    result = _request(f"{proj}/requirements/{req_id}/events", token, _build_assign_event(user, notes), "POST")
+    if result.get("error"):
+        return _friendly_error(result, f"assign requirement '{requirement_identifier}'")
+    return json.dumps({"message": f"Requirement {requirement_identifier} assigned", "assignee": user, "data": result.get("data")}, indent=2)
+
+
+@mcp.tool()
+def assign_test_case(project_name: str = "", test_case_identifier: str = "",
+                      assignee: str = "", notes: str = "") -> str:
+    """Assign a test case to a Helix user by username, full name, or user ID."""
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+    tc_id = _resolve_test_case_id(project_name, token, test_case_identifier)
+    if tc_id is None:
+        return f"Error: Could not find test case '{test_case_identifier}'."
+    proj = _encode_project(project_name)
+    user = _resolve_user(project_name, token, f"{proj}/testCases/{tc_id}", assignee)
+    if user is None:
+        return f"Error: Could not resolve a unique Helix user matching '{assignee}'."
+    if not notes.strip():
+        return "Error: notes are required when assigning a test case."
+    result = _request(f"{proj}/testCases/{tc_id}/events", token, _build_assign_event(user, notes), "POST")
+    if result.get("error"):
+        return _friendly_error(result, f"assign test case '{test_case_identifier}'")
+    return json.dumps({"message": f"Test case {test_case_identifier} assigned", "assignee": user, "data": result.get("data")}, indent=2)
 
 
 @mcp.tool()
