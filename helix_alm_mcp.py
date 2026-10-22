@@ -1214,7 +1214,12 @@ def get_issue_attachments(project_name: str = "", issue_identifier: str = "") ->
         return _friendly_error(result, f"get attachments for issue '{issue_identifier}'")
 
     data = result.get("data") or {}
-    attachments = data.get("attachments", []) if isinstance(data, dict) else []
+    if isinstance(data, dict):
+        # Current Helix ALM responses use attachmentsData; retain support for
+        # the older attachments shape for compatibility with older servers.
+        attachments = data.get("attachmentsData", data.get("attachments", []))
+    else:
+        attachments = []
     formatted = []
     for attachment in attachments:
         item = dict(attachment)
