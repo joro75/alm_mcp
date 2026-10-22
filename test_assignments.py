@@ -44,6 +44,28 @@ class AssignmentTests(unittest.TestCase):
         self.assertIn("Could not resolve", result)
         self.assertEqual(request.call_count, 4)
 
+    def test_unassign_issue_posts_empty_user_array_and_notes(self):
+        responses = [
+            {"status": 200, "data": {"accessToken": "token"}},
+            {"status": 200, "data": {"issues": []}},
+            {"status": 200, "data": {"id": 42}},
+            {"status": 200, "data": {"eventsData": [{"name": "Assign"}]}},
+        ]
+        with patch.object(server, "_request", side_effect=responses) as request:
+            result = json.loads(server.unassign_issue("", "42", "No longer assigned"))
+
+        self.assertIn("unassigned", result["message"])
+        payload = request.call_args_list[3].args[2]
+        self.assertEqual(payload["eventsData"][0]["fields"][0]["userArray"], [])
+        self.assertEqual(payload["eventsData"][0]["fields"][1]["string"], "No longer assigned")
+
+    def test_unassign_issue_rejects_missing_notes_before_api_call(self):
+        with patch.object(server, "_request") as request:
+            result = server.unassign_issue("", "42", "")
+
+        self.assertIn("notes are required", result)
+        request.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

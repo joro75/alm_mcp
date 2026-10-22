@@ -656,6 +656,15 @@ def _build_assign_event(user: dict, notes: str) -> dict:
     return {"eventsData": [{"name": "Assign", "fields": fields}]}
 
 
+def _build_unassign_event(notes: str) -> dict:
+    if not notes.strip():
+        raise ValueError("notes are required for Assign workflow events")
+    return {"eventsData": [{"name": "Assign", "fields": [
+        {"label": "Assign To", "type": "userArray", "userArray": []},
+        {"label": "Notes", "type": "string", "string": notes},
+    ]}]}
+
+
 def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> int | None:
     """Resolve a requirement tag (e.g. 'BR-1960') or numeric ID to the internal API id.
 
@@ -1754,6 +1763,51 @@ def assign_test_case(project_name: str = "", test_case_identifier: str = "",
     if result.get("error"):
         return _friendly_error(result, f"assign test case '{test_case_identifier}'")
     return json.dumps({"message": f"Test case {test_case_identifier} assigned", "assignee": user, "data": result.get("data")}, indent=2)
+
+
+@mcp.tool()
+def unassign_issue(project_name: str = "", issue_identifier: str = "", notes: str = "") -> str:
+    """Remove all assignees from an issue using an Assign workflow event."""
+    return _unassign_item(project_name, issue_identifier, notes, "issue")
+
+
+@mcp.tool()
+def unassign_requirement(project_name: str = "", requirement_identifier: str = "", notes: str = "") -> str:
+    """Remove all assignees from a requirement using an Assign workflow event."""
+    return _unassign_item(project_name, requirement_identifier, notes, "requirement")
+
+
+@mcp.tool()
+def unassign_test_case(project_name: str = "", test_case_identifier: str = "", notes: str = "") -> str:
+    """Remove all assignees from a test case using an Assign workflow event."""
+    return _unassign_item(project_name, test_case_identifier, notes, "test case")
+
+
+def _unassign_item(project_name: str, identifier: str, notes: str, item_type: str) -> str:
+    if not notes.strip():
+        return f"Error: notes are required when unassigning a {item_type}."
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+    proj = _encode_project(project_name)
+    if item_type == "issue":
+        item_id = _resolve_issue_id(project_name, token, identifier)
+        resource = "issues"
+    elif item_type == "requirement":
+        item_id = _resolve_requirement_id(project_name, token, identifier)
+        resource = "requirements"
+    else:
+        item_id = _resolve_test_case_id(project_name, token, identifier)
+        resource = "testCases"
+    if item_id is None:
+        return f"Error: Could not find {item_type} '{identifier}'."
+    result = _request(f"{proj}/{resource}/{item_id}/events", token, _build_unassign_event(notes), "POST")
+    if result.get("error"):
+        return _friendly_error(result, f"unassign {item_type} '{identifier}'")
+    return json.dumps({"message": f"{item_type.title()} {identifier} unassigned", "data": result.get("data")}, indent=2)
 
 
 @mcp.tool()
