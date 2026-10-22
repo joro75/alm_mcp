@@ -657,12 +657,10 @@ def _build_assign_event(user: dict, notes: str) -> dict:
 
 
 def _build_unassign_event(notes: str) -> dict:
-    if not notes.strip():
-        raise ValueError("notes are required for Assign workflow events")
-    return {"eventsData": [{"name": "Assign", "fields": [
-        {"label": "Assign To", "type": "userArray", "userArray": []},
-        {"label": "Notes", "type": "string", "string": notes},
-    ]}]}
+    fields = []
+    if notes.strip():
+        fields.append({"label": "Notes", "type": "string", "string": notes})
+    return {"eventsData": [{"name": "Unassign", "fields": fields}]}
 
 
 def _resolve_requirement_id(project_name: str, token: str, identifier: str) -> int | None:
@@ -1767,25 +1765,23 @@ def assign_test_case(project_name: str = "", test_case_identifier: str = "",
 
 @mcp.tool()
 def unassign_issue(project_name: str = "", issue_identifier: str = "", notes: str = "") -> str:
-    """Remove all assignees from an issue using an Assign workflow event."""
+    """Remove all assignees from an issue using the configured Unassign event."""
     return _unassign_item(project_name, issue_identifier, notes, "issue")
 
 
 @mcp.tool()
 def unassign_requirement(project_name: str = "", requirement_identifier: str = "", notes: str = "") -> str:
-    """Remove all assignees from a requirement using an Assign workflow event."""
+    """Remove all assignees from a requirement using the configured Unassign event."""
     return _unassign_item(project_name, requirement_identifier, notes, "requirement")
 
 
 @mcp.tool()
 def unassign_test_case(project_name: str = "", test_case_identifier: str = "", notes: str = "") -> str:
-    """Remove all assignees from a test case using an Assign workflow event."""
+    """Remove all assignees from a test case using the configured Unassign event."""
     return _unassign_item(project_name, test_case_identifier, notes, "test case")
 
 
 def _unassign_item(project_name: str, identifier: str, notes: str, item_type: str) -> str:
-    if not notes.strip():
-        return f"Error: notes are required when unassigning a {item_type}."
     project_name = _resolve_project(project_name)
     if not project_name:
         return _no_project_msg()

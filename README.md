@@ -158,7 +158,7 @@ Discover the values currently in use for a specific field on requirements or tes
 | `list_requirements` | List requirements in a project (supports column selection and saved filters) |
 | `get_requirement` | Get full details of a single requirement by tag (e.g. `BR-1960`) or numeric ID |
 | `assign_requirement` | Assign a requirement to a user by name, username, or ID |
-| `unassign_requirement` | Remove all assignees from a requirement |
+| `unassign_requirement` | Remove all assignees from a requirement using the configured `Unassign` event (database-specific) |
 | `get_requirement_types` | List the requirement types configured in a project |
 | `create_requirement` | Create a new requirement with summary, description, type, priority, and custom fields |
 | `update_requirement` | Update fields on an existing requirement |
@@ -182,7 +182,7 @@ and description "The system must support SAML 2.0 SSO for all users."
 | `list_issues` | List issues in a project (supports column selection and saved filters) |
 | `get_issue` | Get full details of a single issue by tag or numeric ID |
 | `assign_issue` | Assign an issue to a user by name, username, or ID |
-| `unassign_issue` | Remove all assignees from an issue |
+| `unassign_issue` | Remove all assignees from an issue using the configured `Unassign` event (database-specific) |
 | `get_issue_attachments` | Get attachment metadata and API download paths for an issue |
 | `add_issue_event` | Trigger a workflow event on an issue (e.g. `Comment`) |
 | `get_issue_workflow_events` | List the workflow events currently available for an issue |
@@ -198,7 +198,7 @@ and description "The system must support SAML 2.0 SSO for all users."
 | `search_test_cases` | Full-text search across Summary and Description fields |
 | `get_test_case` | Get full details of a test case by tag or ID, including steps and linked items |
 | `assign_test_case` | Assign a test case to a user by name, username, or ID |
-| `unassign_test_case` | Remove all assignees from a test case |
+| `unassign_test_case` | Remove all assignees from a test case using the configured `Unassign` event (database-specific) |
 | `get_test_case_types` | List the test case types in use in a project |
 | `create_test_case` | Create a new test case with optional steps (steps are added via a separate PUT to the `/steps` sub-resource after creation) |
 | `update_test_case` | Update fields and/or steps on an existing test case (replaces all steps) |

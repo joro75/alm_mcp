@@ -24,7 +24,6 @@ class AssignmentTests(unittest.TestCase):
         ]
         with patch.object(server, "_request", side_effect=responses) as request:
             result = json.loads(server.assign_issue("", "42", "John de Rooij", "Please investigate"))
-
         self.assertEqual(result["assignee"]["id"], 12)
         payload = request.call_args_list[4].args[2]
         self.assertEqual(payload["eventsData"][0]["name"], "Assign")
@@ -40,31 +39,34 @@ class AssignmentTests(unittest.TestCase):
         ]
         with patch.object(server, "_request", side_effect=responses) as request:
             result = server.assign_issue("", "42", "Unknown User")
-
         self.assertIn("Could not resolve", result)
         self.assertEqual(request.call_count, 4)
 
-    def test_unassign_issue_posts_empty_user_array_and_notes(self):
+    def test_unassign_issue_posts_unassign_event_without_notes(self):
         responses = [
             {"status": 200, "data": {"accessToken": "token"}},
             {"status": 200, "data": {"issues": []}},
             {"status": 200, "data": {"id": 42}},
-            {"status": 200, "data": {"eventsData": [{"name": "Assign"}]}},
+            {"status": 200, "data": {"eventsData": [{"name": "Unassign"}]}},
         ]
         with patch.object(server, "_request", side_effect=responses) as request:
-            result = json.loads(server.unassign_issue("", "42", "No longer assigned"))
-
+            result = json.loads(server.unassign_issue("", "42"))
         self.assertIn("unassigned", result["message"])
         payload = request.call_args_list[3].args[2]
-        self.assertEqual(payload["eventsData"][0]["fields"][0]["userArray"], [])
-        self.assertEqual(payload["eventsData"][0]["fields"][1]["string"], "No longer assigned")
+        self.assertEqual(payload["eventsData"][0]["name"], "Unassign")
+        self.assertEqual(payload["eventsData"][0]["fields"], [])
 
-    def test_unassign_issue_rejects_missing_notes_before_api_call(self):
-        with patch.object(server, "_request") as request:
-            result = server.unassign_issue("", "42", "")
-
-        self.assertIn("notes are required", result)
-        request.assert_not_called()
+    def test_unassign_issue_includes_optional_notes(self):
+        responses = [
+            {"status": 200, "data": {"accessToken": "token"}},
+            {"status": 200, "data": {"issues": []}},
+            {"status": 200, "data": {"id": 42}},
+            {"status": 200, "data": {"eventsData": [{"name": "Unassign"}]}},
+        ]
+        with patch.object(server, "_request", side_effect=responses) as request:
+            server.unassign_issue("", "42", "No longer assigned")
+        payload = request.call_args_list[3].args[2]
+        self.assertEqual(payload["eventsData"][0]["fields"][0]["string"], "No longer assigned")
 
 
 if __name__ == "__main__":
