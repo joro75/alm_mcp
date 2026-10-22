@@ -336,6 +336,7 @@ mcp = FastMCP(
         "- 'show/list my issues' → list_issues\n"
         "- 'find issues about X' → search_issues\n"
         "- 'show me issue IS-123' → get_issue\n"
+        "- 'show/download attachments for issue IS-123' → get_issue_attachments\n"
         "- 'what can I do with this issue' → get_issue_workflow_events\n"
         "- 'what priority/status/category values can I use' → get_field_values\n"
         "- 'show/list my test cases' → list_test_cases\n"
@@ -1185,6 +1186,43 @@ def get_issue(project_name: str = "", issue_identifier: str = "") -> str:
         summary["linked_items"] = formatted_links
 
     return json.dumps(summary, indent=2)
+
+
+@mcp.tool()
+def get_issue_attachments(project_name: str = "", issue_identifier: str = "") -> str:
+    """Get file attachment metadata and download paths for an issue.
+
+    Args:
+        project_name: Name of the Helix ALM project. Uses the default project if not specified.
+        issue_identifier: The issue tag (e.g. 'IS-123') or numeric ID.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return (_helix_not_configured_msg() if not _helix_configured()
+                else f"Error: Could not get access token for project '{project_name}'.")
+
+    issue_id = _resolve_issue_id(project_name, token, issue_identifier)
+    if issue_id is None:
+        return f"Error: Could not find issue '{issue_identifier}'."
+
+    proj = _encode_project(project_name)
+    result = _request(f"{proj}/issues/{issue_id}/attachments", token)
+    if result.get("error"):
+        return _friendly_error(result, f"get attachments for issue '{issue_identifier}'")
+
+    data = result.get("data") or {}
+    attachments = data.get("attachments", []) if isinstance(data, dict) else []
+    formatted = []
+    for attachment in attachments:
+        item = dict(attachment)
+        encoded_file_id = item.get("encodedFileID")
+        if encoded_file_id:
+            item["download_path"] = f"{proj}/files/{urllib.parse.quote(str(encoded_file_id), safe='')}"
+        formatted.append(item)
+    return json.dumps({"count": len(formatted), "attachments": formatted}, indent=2)
 
 
 @mcp.tool()
