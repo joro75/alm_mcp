@@ -9,7 +9,8 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that c
 ## Features
 
 - **Requirements** — list, search, create, update, delete, and trigger workflow events
-- **Issues** — list, search, read issue details, and trigger workflow events
+- **Issues** — list, search, read issue details, inspect attachments, and trigger workflow events
+- **Attachments** — retrieve attachment metadata and download binary attachment files
 - **Test Cases** — list, search, create, read, update, and append steps; link to requirements
 - **Requirement Documents** — browse document trees, add requirements to sections, create snapshots
 - **Automation Suites** — submit test run results (manually, from JUnit/xUnit XML, or from Azure DevOps builds); reference suites by name or ID
@@ -187,6 +188,37 @@ and description "The system must support SAML 2.0 SSO for all users."
 | `add_issue_event` | Trigger a workflow event on an issue (e.g. `Comment`) |
 | `get_issue_workflow_events` | List the workflow events currently available for an issue |
 | `search_issues` | Full-text search across Summary and Description fields |
+
+#### Attachments
+
+Use `get_issue_attachments` to discover an issue's attachments. The response
+contains each attachment's `encodedFileID`, filename, and size. Then call
+`download_attachment` with that `encodedFileID` to retrieve the binary file.
+The download operation is also usable with attachment metadata obtained from
+requirements or test cases.
+
+`download_attachment` calls the Helix ALM REST endpoint
+`GET /<project>/files/<encodedFileID>`, saves the response in the requested
+local directory (or the current directory), removes path components from the
+provided filename, and adds `(1)`, `(2)`, etc. when a filename already exists.
+It verifies the downloaded byte count against the supplied metadata size or
+the response `Content-Length` before writing the file.
+
+Example sequence:
+
+```text
+get_issue_attachments(project_name="RadiMation", issue_identifier="IS-123")
+download_attachment(
+    project_name="RadiMation",
+    encoded_file_id="<encodedFileID from the metadata response>",
+    filename="error.zip",
+    expected_size=<size from the metadata response>
+)
+```
+
+The returned result includes the local path, final filename, byte count,
+content type, and encoded file ID. The path is local to the machine running the
+MCP server.
 
 ---
 

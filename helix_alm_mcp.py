@@ -336,7 +336,8 @@ mcp = FastMCP(
         "- 'show/list my issues' → list_issues\n"
         "- 'find issues about X' → search_issues\n"
         "- 'show me issue IS-123' → get_issue\n"
-        "- 'show/download attachments for issue IS-123' → get_issue_attachments\n"
+        "- 'show/list attachments for issue IS-123' → get_issue_attachments\n"
+        "- 'download an attachment' → call get_issue_attachments first, then download_attachment\n"
         "- 'what can I do with this issue' → get_issue_workflow_events\n"
         "- 'what priority/status/category values can I use' → get_field_values\n"
         "- 'show/list my test cases' → list_test_cases\n"
@@ -425,6 +426,36 @@ def _request(path: str, access_token: str | None = None,
                     "error": True, "message": str(e)}
 
     return last_result if last_result is not None else {"status": 0, "data": None, "error": True, "message": "Request failed."}
+
+
+def _request_binary(path: str, access_token: str | None = None) -> dict:
+    """Send a GET request whose response body is binary rather than JSON."""
+    url = _get_helix_url() + path
+    ctx = ssl.create_default_context()
+    if not _session["helix_alm_ssl_verify"]:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+    req = urllib.request.Request(url)
+    req.add_header("Authorization", _get_auth_header(access_token))
+    try:
+        with urllib.request.urlopen(req, context=ctx) as resp:
+            return {
+                "status": resp.status,
+                "headers": dict(resp.headers.items()),
+                "data": resp.read(),
+            }
+    except urllib.error.HTTPError as e:
+        detail = e.read()
+        try:
+            detail = json.loads(detail.decode())
+        except Exception:
+            detail = {"raw": detail.decode(errors="replace")}
+        return {"status": e.code, "headers": dict(e.headers.items()),
+                "data": detail, "error": True}
+    except Exception as e:
+        return {"status": 0, "headers": {}, "data": None,
+                "error": True, "message": str(e)}
 
 
 def _encode_project(project_name: str) -> str:
@@ -1292,6 +1323,76 @@ def get_issue_attachments(project_name: str = "", issue_identifier: str = "") ->
             item["download_path"] = f"{proj}/files/{urllib.parse.quote(str(encoded_file_id), safe='')}"
         formatted.append(item)
     return json.dumps({"count": len(formatted), "attachments": formatted}, indent=2)
+
+
+def _unique_attachment_path(directory: str, filename: str) -> str:
+    """Return a safe, unused path under directory."""
+    safe_name = os.path.basename(filename).strip() or "attachment"
+    stem, suffix = os.path.splitext(safe_name)
+    candidate = os.path.join(directory, safe_name)
+    index = 1
+    while os.path.exists(candidate):
+        candidate = os.path.join(directory, f"{stem} ({index}){suffix}")
+        index += 1
+    return candidate
+
+
+@mcp.tool()
+def download_attachment(
+    project_name: str = "",
+    encoded_file_id: str = "",
+    filename: str = "attachment",
+    output_directory: str = "",
+    expected_size: int = 0,
+) -> str:
+    """Download an ALM attachment and save it locally.
+
+    Call get_issue_attachments first to obtain encoded_file_id. The same
+    operation is usable for attachments from requirements and test cases when
+    their metadata contains an encodedFileID.
+
+    Args:
+        project_name: Helix ALM project; uses the default project if omitted.
+        encoded_file_id: The encodedFileID returned by an attachment metadata call.
+        filename: Original attachment filename; path components are discarded.
+        output_directory: Local directory in which to save the file. Defaults to the current directory.
+        expected_size: Optional size from attachment metadata, in bytes, for verification.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    if not encoded_file_id:
+        return "Error: encoded_file_id is required. Call get_issue_attachments first."
+    token = _get_token(project_name)
+    if not token:
+        return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
+
+    directory = output_directory or os.getcwd()
+    os.makedirs(directory, exist_ok=True)
+    path = _unique_attachment_path(directory, filename)
+    proj = _encode_project(project_name)
+    encoded_path = f"{proj}/files/{urllib.parse.quote(str(encoded_file_id), safe='')}"
+    result = _request_binary(encoded_path, token)
+    if result.get("error") or result.get("status", 0) < 200 or result.get("status", 0) >= 300:
+        return _friendly_error(result, "download the attachment")
+
+    content = result.get("data")
+    if not isinstance(content, bytes):
+        return "Error: attachment response did not contain binary data."
+    content_length = result.get("headers", {}).get("Content-Length")
+    expected = expected_size or (int(content_length) if content_length else 0)
+    if expected and expected != len(content):
+        return f"Error: attachment size mismatch (expected {expected} bytes, received {len(content)} bytes)."
+
+    with open(path, "wb") as output:
+        output.write(content)
+    return json.dumps({
+        "filename": os.path.basename(path),
+        "path": path,
+        "size": len(content),
+        "content_type": result.get("headers", {}).get("Content-Type", ""),
+        "encoded_file_id": encoded_file_id,
+    }, indent=2)
 
 
 @mcp.tool()

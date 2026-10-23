@@ -1,5 +1,7 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import helix_alm_mcp as server
@@ -55,6 +57,43 @@ class IssueAttachmentTests(unittest.TestCase):
             result = server.get_issue_attachments("", "42")
 
         self.assertIn("permission", result)
+
+    def test_download_attachment_writes_binary_and_avoids_duplicate_filename(self):
+        payload = b"binary attachment contents\x00\x01"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            existing = Path(temp_dir) / "log.txt"
+            existing.write_bytes(b"existing")
+            with patch.object(server, "_get_token", return_value="token"), \
+                    patch.object(server, "_request_binary", return_value={
+                        "status": 200,
+                        "headers": {"Content-Type": "text/plain"},
+                        "data": payload,
+                    }) as request:
+                result = json.loads(server.download_attachment(
+                    "Demo", "encoded/id", "../log.txt", temp_dir
+                ))
+
+            downloaded = Path(result["path"])
+            self.assertEqual(downloaded.name, "log (1).txt")
+            self.assertEqual(downloaded.read_bytes(), payload)
+            self.assertEqual(result["size"], len(payload))
+            self.assertEqual(result["content_type"], "text/plain")
+            request.assert_called_once_with("Demo/files/encoded%2Fid", "token")
+
+    def test_download_attachment_rejects_size_mismatch(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(server, "_get_token", return_value="token"), \
+                    patch.object(server, "_request_binary", return_value={
+                        "status": 200,
+                        "headers": {"Content-Length": "99"},
+                        "data": b"short",
+                    }):
+                result = server.download_attachment(
+                    "Demo", "file-id", "log.txt", temp_dir
+                )
+
+            self.assertIn("size mismatch", result.lower())
+            self.assertFalse((Path(temp_dir) / "log.txt").exists())
 
 
 if __name__ == "__main__":
