@@ -332,7 +332,7 @@ and steps: navigate to login, click SSO, verify redirect. Then link it to requir
 | `get_document_node_children` | Get the direct children of a specific node in a document tree |
 | `add_to_document_tree` | Add requirements as children under a specific node; snapshots are optional |
 | `add_to_document_tree_top_level` | Add requirements as top-level nodes; snapshots are optional |
-| `get_document_requirements` | List all requirements belonging to a document (via `expand=documents`) |
+| `get_document_requirements` | List all requirements belonging to a document (via Document List field) |
 | `create_document_snapshot` | Create a point-in-time snapshot of a document for baselining |
 
 Document snapshots are optional. Create one before a document-tree change only
