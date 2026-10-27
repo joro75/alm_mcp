@@ -67,6 +67,82 @@ class RequirementCreationPayloadTests(unittest.TestCase):
             {"label": "Business Requirement"},
         )
 
+    def test_supported_field_types_are_encoded(self):
+        field_types = {
+            "Notes": "formattedString",
+            "Source": "user",
+            "Owners": "userArray",
+            "Story Points": "integer",
+        }
+        self.assertEqual(
+            server._build_requirement_field("Notes", "text", field_types),
+            {
+                "label": "Notes",
+                "type": "formattedString",
+                "formattedString": {"isFormatted": False, "text": "text"},
+            },
+        )
+        self.assertEqual(
+            server._build_requirement_field("Source", "joro", field_types),
+            {"label": "Source", "type": "user", "user": {"username": "joro"}},
+        )
+        self.assertEqual(
+            server._build_requirement_field("Owners", [{"username": "joro"}], field_types),
+            {"label": "Owners", "type": "userArray", "userArray": [{"username": "joro"}]},
+        )
+        self.assertEqual(
+            server._build_requirement_field("Story Points", 3, field_types),
+            {"label": "Story Points", "type": "integer", "integer": 3},
+        )
+
+    def test_non_dictionary_additional_fields_is_rejected_without_posting(self):
+        with patch.object(server, "_get_token", return_value="test-token"), patch.object(
+            server, "_request"
+        ) as request:
+            result = server.create_requirement(
+                project_name="RadiMation",
+                summary="Invalid input",
+                additional_fields="{\"Importance\": \"Must\"}",
+            )
+
+        self.assertEqual(result, "Error: additional_fields must be a dictionary.")
+        request.assert_not_called()
+
+    def test_field_discovery_failure_falls_back_to_known_menu_types(self):
+        with patch.object(server, "_request", return_value={"status": 500, "error": True}):
+            field_types = server._requirement_field_types("RadiMation", "test-token")
+
+        self.assertEqual(field_types, {})
+        self.assertEqual(
+            server._build_requirement_field("Importance", "Must", field_types),
+            {"label": "Importance", "type": "menuItem", "menuItem": {"label": "Must"}},
+        )
+
+    def test_partial_create_response_reports_warnings(self):
+        responses = [
+            {"status": 200, "data": {"requirements": [{"id": 1}]}},
+            {"status": 200, "data": {"fields": []}},
+            {
+                "status": 206,
+                "error": True,
+                "data": {
+                    "requirements": [{"id": 3015, "tag": "BR-3015", "fields": []}],
+                    "errors": [{"message": "Optional field ignored"}],
+                },
+            },
+        ]
+
+        with patch.object(server, "_get_token", return_value="test-token"), patch.object(
+            server, "_request", side_effect=lambda *args, **kwargs: responses.pop(0)
+        ):
+            result = json.loads(
+                server.create_requirement(project_name="RadiMation", summary="Partial create")
+            )
+
+        self.assertEqual(result["message"], "Requirement created with warnings")
+        self.assertEqual(result["requirement"]["tag"], "BR-3015")
+        self.assertEqual(result["warnings"][0]["message"], "Optional field ignored")
+
 
 if __name__ == "__main__":
     unittest.main()

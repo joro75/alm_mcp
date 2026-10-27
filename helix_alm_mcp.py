@@ -1571,6 +1571,8 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
     project_name = _resolve_project(project_name)
     if not project_name:
         return _no_project_msg()
+    if additional_fields is not None and not isinstance(additional_fields, dict):
+        return "Error: additional_fields must be a dictionary."
     token = _get_token(project_name)
     if not token:
         return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
@@ -1600,8 +1602,6 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
 
     # Apply any additional fields
     if additional_fields is not None:
-        if not isinstance(additional_fields, dict):
-            return "Error: additional_fields must be a dictionary."
         for label, value in additional_fields.items():
             if not any(f["label"] == label for f in body["fields"]):
                 body["fields"].append(_build_requirement_field(label, value, field_types))
