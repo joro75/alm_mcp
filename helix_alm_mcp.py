@@ -626,6 +626,11 @@ def _build_requirement_field(label: str, value: Any, field_types: dict[str, str]
     return field
 
 
+def _build_requirement_type_payload(requirement_type: str) -> dict[str, Any]:
+    """Build the requirement type object accepted by Helix create/update APIs."""
+    return {"label": requirement_type}
+
+
 def _format_requirement(req: dict) -> dict:
     """Format a requirement into a readable summary."""
     fields = req.get("fields", [])
@@ -1574,7 +1579,7 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
 
     # Build the requirement body
     body = {
-        "requirementType": {"label": requirement_type},
+        "requirementType": _build_requirement_type_payload(requirement_type),
         "fields": [
             {
                 "label": "Summary",
