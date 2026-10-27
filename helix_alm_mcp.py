@@ -3056,7 +3056,8 @@ def add_to_document_tree_top_level(project_name: str = "", document_identifier: 
 @mcp.tool()
 def get_document_requirements(project_name: str = "", document_name: str = "") -> str:
     """Get all requirements that belong to a specific requirement document, grouped by type.
-    This finds requirements via their 'Document List' field rather than the tree structure.
+    Uses the API's authoritative ``expand=documents`` relationship rather than
+    relying on the requirement's ``Document List`` field.
 
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
@@ -3070,15 +3071,34 @@ def get_document_requirements(project_name: str = "", document_name: str = "") -
         return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
 
     proj = _encode_project(project_name)
-    result = _request(f"{proj}/requirements", token)
-    if result.get("error"):
-        return _friendly_error(result, "get document requirements")
-
+    document_id = _resolve_document_id(project_name, token, document_name)
+    if document_id is None:
+        return f"Error: Could not find document '{document_name}'."
+    # The Document List field is not reliably populated for requirements added
+    # through the document-tree API. Request the authoritative document
+    # relationship explicitly; the API supports `expand=documents` here.
     matched = []
-    for req in result["data"].get("requirements", []):
-        fields = req.get("fields", [])
-        doc_list = _get_field(fields, "Document List") or ""
-        if document_name.lower() in doc_list.lower():
+    page = 1
+    per_page = 300
+    while True:
+        result = _request(
+            f"{proj}/requirements?expand=documents&per_page={per_page}&page={page}",
+            token,
+        )
+        if result.get("error"):
+            return _friendly_error(result, "get document requirements")
+
+        data = result.get("data") or {}
+        for req in data.get("requirements", []):
+            documents = (req.get("documents") or {}).get("documentsData", [])
+            belongs_to_document = any(
+                document.get("documentID") == document_id
+                for document in documents
+            )
+            if not belongs_to_document:
+                continue
+
+            fields = req.get("fields", [])
             desc = _get_field(fields, "Description") or ""
             desc_clean = re.sub(r"<[^>]+>", " ", desc).strip()
             desc_clean = re.sub(r"\s+", " ", desc_clean)
@@ -3091,6 +3111,12 @@ def get_document_requirements(project_name: str = "", document_name: str = "") -
                 "status": _get_field(fields, "Status") or "",
                 "description": desc_clean[:300],
             })
+
+        paging = data.get("paging") or {}
+        total_pages = paging.get("totalPages")
+        if page >= (total_pages or page) or not data.get("requirements"):
+            break
+        page += 1
 
     # Group by type
     by_type = {}

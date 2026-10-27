@@ -143,6 +143,44 @@ class RequirementCreationPayloadTests(unittest.TestCase):
         self.assertEqual(result["requirement"]["tag"], "BR-3015")
         self.assertEqual(result["warnings"][0]["message"], "Optional field ignored")
 
+    def test_document_membership_uses_expanded_documents(self):
+        responses = [
+            {"status": 200, "data": {"documents": [{"id": 65, "fields": [{"label": "Name", "type": "string", "string": "Raditeq RadiPower-series"}]}]}},
+            {
+                "status": 200,
+                "data": {
+                    "paging": {"totalPages": 1},
+                    "requirements": [{
+                        "id": 3015,
+                        "tag": "BR-3015",
+                        "requirementType": {"label": "Business Requirement"},
+                        "documents": {"documentsData": [{"documentID": 65}]},
+                        "fields": [{"label": "Summary", "type": "string", "string": "A driver"}],
+                    }],
+                },
+            },
+        ]
+
+        def fake_request(path, token=None, body=None, method="GET"):
+            self.assertIn(path, {
+                "RadiMation/documents",
+                "RadiMation/requirements?expand=documents&per_page=300&page=1",
+            })
+            return responses.pop(0)
+
+        with patch.object(server, "_get_token", return_value="test-token"), patch.object(
+            server, "_request", side_effect=fake_request
+        ):
+            result = json.loads(
+                server.get_document_requirements(
+                    project_name="RadiMation",
+                    document_name="Raditeq RadiPower-series",
+                )
+            )
+
+        self.assertEqual(result["total_requirements"], 1)
+        self.assertEqual(result["by_type"]["Business Requirement"][0]["tag"], "BR-3015")
+
 
 if __name__ == "__main__":
     unittest.main()
