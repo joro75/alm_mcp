@@ -3056,8 +3056,8 @@ def add_to_document_tree_top_level(project_name: str = "", document_identifier: 
 @mcp.tool()
 def get_document_requirements(project_name: str = "", document_name: str = "") -> str:
     """Get all requirements that belong to a specific requirement document, grouped by type.
-    Uses the API's authoritative ``expand=documents`` relationship rather than
-    relying on the requirement's ``Document List`` field.
+    This reports the requirements associated with the document, including their
+    document-tree membership.
 
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
