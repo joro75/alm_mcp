@@ -328,7 +328,7 @@ and steps: navigate to login, click SSO, verify redirect. Then link it to requir
 |------|-------------|
 | `list_documents` | List all requirement documents in a project |
 | `create_document` | Create a new requirement document |
-| `get_document_tree` | Get the full hierarchical tree of a document (sections and requirements) |
+| `get_document_tree` | Get the full hierarchical tree of a document (sections and requirements); requirement details are included by default and can be omitted for a lighter response |
 | `get_document_node_children` | Get the direct children of a specific node in a document tree |
 | `add_to_document_tree` | Add requirements as children under a specific node; snapshots are optional |
 | `add_to_document_tree_top_level` | Add requirements as top-level nodes; snapshots are optional |

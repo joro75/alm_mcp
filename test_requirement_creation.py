@@ -210,6 +210,25 @@ class RequirementCreationPayloadTests(unittest.TestCase):
 
         self.assertEqual(tree[0]["children"][0]["tag"], "BR-3015")
 
+    def test_tree_builder_can_omit_requirement_detail_requests(self):
+        nodes = [{
+            "id": 40,
+            "outlineNumber": "4.5",
+            "requirementID": 3015,
+            "tag": "BR-3015",
+            "childNodes": {"childNodesData": []},
+        }]
+
+        with patch.object(server, "_request") as request:
+            tree = server._build_tree_recursive(
+                "RadiMation", "test-token", 65, None, 0, 3, nodes,
+                include_requirement_details=False,
+            )
+
+        self.assertEqual(tree[0]["tag"], "BR-3015")
+        self.assertNotIn("summary", tree[0])
+        request.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

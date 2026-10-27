@@ -2682,7 +2682,8 @@ def _resolve_suite_id(project_name: str, token: str, identifier: str) -> int | N
 
 def _build_tree_recursive(proj: str, token: str, tree_id: int,
                           node_id: int | None, depth: int, max_depth: int,
-                          nodes: list | None = None) -> list:
+                          nodes: list | None = None,
+                          include_requirement_details: bool = True) -> list:
     """Recursively build a tree of nodes with requirement details."""
     if depth > max_depth:
         return []
@@ -2709,25 +2710,27 @@ def _build_tree_recursive(proj: str, token: str, tree_id: int,
             "requirement_id": req_id,
         }
 
-        # Fetch requirement summary
-        req_result = _request(f"{proj}/requirements/{req_id}", token)
-        if not req_result.get("error"):
-            req = req_result["data"]
-            fields = req.get("fields", [])
-            entry["summary"] = _get_field(fields, "Summary") or ""
-            entry["type"] = req.get("requirementType", {}).get("label", "")
-            entry["priority"] = _get_field(fields, "Priority") or ""
-            entry["status"] = _get_field(fields, "Status") or ""
-            desc = _get_field(fields, "Description") or ""
-            desc_clean = re.sub(r"<[^>]+>", " ", desc).strip()
-            desc_clean = re.sub(r"\s+", " ", desc_clean)
-            entry["description"] = desc_clean[:300]
+        if include_requirement_details:
+            # Fetch requirement summary
+            req_result = _request(f"{proj}/requirements/{req_id}", token)
+            if not req_result.get("error"):
+                req = req_result["data"]
+                fields = req.get("fields", [])
+                entry["summary"] = _get_field(fields, "Summary") or ""
+                entry["type"] = req.get("requirementType", {}).get("label", "")
+                entry["priority"] = _get_field(fields, "Priority") or ""
+                entry["status"] = _get_field(fields, "Status") or ""
+                desc = _get_field(fields, "Description") or ""
+                desc_clean = re.sub(r"<[^>]+>", " ", desc).strip()
+                desc_clean = re.sub(r"\s+", " ", desc_clean)
+                entry["description"] = desc_clean[:300]
 
         # Recurse into children
         expanded_children = (node.get("childNodes") or {}).get("childNodesData")
         children = _build_tree_recursive(
             proj, token, tree_id, node["id"], depth + 1, max_depth,
             expanded_children if expanded_children is not None else None,
+            include_requirement_details,
         )
         if children:
             entry["children"] = children
@@ -2824,7 +2827,8 @@ def create_document(project_name: str = "", name: str = "") -> str:
 
 @mcp.tool()
 def get_document_tree(project_name: str = "", document_identifier: str = "",
-                      max_depth: int = 3) -> str:
+                      max_depth: int = 3,
+                      include_requirement_details: bool = True) -> str:
     """Get the hierarchical tree structure of a requirement document, showing all
     sections and requirements organized in their outline order.
 
@@ -2832,6 +2836,11 @@ def get_document_tree(project_name: str = "", document_identifier: str = "",
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
         document_identifier: Document tag (e.g. 'RD-91') or numeric ID.
         max_depth: Maximum depth of tree to retrieve (default 3). Use higher values for deeply nested documents.
+            include_requirement_details: Include summary, type, priority, status, and
+                                         description for each requirement. Defaults to
+                                         true for backwards compatibility. Set false
+                                         to return only document-tree information and
+                                         avoid one requirement lookup per node.
     """
     project_name = _resolve_project(project_name)
     if not project_name:
@@ -2853,7 +2862,10 @@ def get_document_tree(project_name: str = "", document_identifier: str = "",
         doc_name = _get_field(doc_result["data"].get("fields", []), "Name") or ""
 
     # Build the tree recursively
-    tree = _build_tree_recursive(proj, token, doc_id, None, 0, max_depth)
+    tree = _build_tree_recursive(
+        proj, token, doc_id, None, 0, max_depth,
+        include_requirement_details=include_requirement_details,
+    )
 
     return json.dumps({
         "document_id": doc_id,
