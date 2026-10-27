@@ -181,6 +181,35 @@ class RequirementCreationPayloadTests(unittest.TestCase):
         self.assertEqual(result["total_requirements"], 1)
         self.assertEqual(result["by_type"]["Business Requirement"][0]["tag"], "BR-3015")
 
+    def test_tree_builder_uses_inline_child_nodes(self):
+        nodes = [{
+            "id": 13,
+            "outlineNumber": "4",
+            "requirementID": 1166,
+            "tag": "BR-1166",
+            "childNodes": {"childNodesData": [{
+                "id": 40,
+                "outlineNumber": "4.5",
+                "requirementID": 3015,
+                "tag": "BR-3015",
+                "childNodes": {"childNodesData": []},
+            }]},
+        }]
+
+        def fake_request(path, token=None, body=None, method="GET"):
+            if "/requirements/" in path:
+                requirement_id = int(path.rsplit("/", 1)[1])
+                return {"status": 200, "data": {
+                    "requirementType": {"label": "Business Requirement"},
+                    "fields": [{"label": "Summary", "type": "string", "string": str(requirement_id)}],
+                }}
+            self.fail(f"unexpected tree request: {path}")
+
+        with patch.object(server, "_request", side_effect=fake_request):
+            tree = server._build_tree_recursive("RadiMation", "test-token", 65, None, 0, 3, nodes)
+
+        self.assertEqual(tree[0]["children"][0]["tag"], "BR-3015")
+
 
 if __name__ == "__main__":
     unittest.main()

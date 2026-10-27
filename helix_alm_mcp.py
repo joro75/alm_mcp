@@ -2681,24 +2681,26 @@ def _resolve_suite_id(project_name: str, token: str, identifier: str) -> int | N
 
 
 def _build_tree_recursive(proj: str, token: str, tree_id: int,
-                          node_id: int | None, depth: int, max_depth: int) -> list:
+                          node_id: int | None, depth: int, max_depth: int,
+                          nodes: list | None = None) -> list:
     """Recursively build a tree of nodes with requirement details."""
     if depth > max_depth:
         return []
 
-    if node_id is None:
-        path = f"{proj}/documentTrees/{tree_id}/nodes"
-        key = "nodesData"
-    else:
-        path = f"{proj}/documentTrees/{tree_id}/nodes/{node_id}/childNodes"
-        key = "childNodesData"
+    if nodes is None:
+        if node_id is None:
+            path = f"{proj}/documentTrees/{tree_id}/nodes?expand=childNodes"
+            key = "nodesData"
+        else:
+            path = f"{proj}/documentTrees/{tree_id}/nodes/{node_id}/childNodes?expand=childNodes"
+            key = "childNodesData"
+        result = _request(path, token)
+        if result.get("error"):
+            return []
+        nodes = result["data"].get(key, [])
 
-    result = _request(path, token)
-    if result.get("error"):
-        return []
-
-    nodes = []
-    for node in result["data"].get(key, []):
+    formatted_nodes = []
+    for node in nodes or []:
         req_id = node.get("requirementID")
         entry = {
             "node_id": node["id"],
@@ -2722,14 +2724,17 @@ def _build_tree_recursive(proj: str, token: str, tree_id: int,
             entry["description"] = desc_clean[:300]
 
         # Recurse into children
-        children = _build_tree_recursive(proj, token, tree_id, node["id"],
-                                         depth + 1, max_depth)
+        expanded_children = (node.get("childNodes") or {}).get("childNodesData")
+        children = _build_tree_recursive(
+            proj, token, tree_id, node["id"], depth + 1, max_depth,
+            expanded_children if expanded_children is not None else None,
+        )
         if children:
             entry["children"] = children
 
-        nodes.append(entry)
+        formatted_nodes.append(entry)
 
-    return nodes
+    return formatted_nodes
 
 
 # --- Document Tree MCP Tools ---
