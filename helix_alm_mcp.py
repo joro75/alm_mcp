@@ -15,6 +15,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import logging
+from typing import Any
 from time import sleep
 from time import time, mktime
 from datetime import datetime, timezone
@@ -582,6 +583,47 @@ def _set_field(fields: list, label: str, value: str) -> bool:
                 f[ftype] = value
             return True
     return False
+
+
+def _requirement_field_types(project_name: str, token: str) -> dict[str, str]:
+    """Return field labels and API types from an existing requirement."""
+    proj = _encode_project(project_name)
+    result = _request(f"{proj}/requirements?limit=1", token)
+    if result.get("error"):
+        return {}
+    requirements = (result.get("data") or {}).get("requirements", [])
+    if not requirements:
+        return {}
+    item_id = requirements[0].get("id")
+    if item_id is None:
+        return {}
+    result = _request(f"{proj}/requirements/{item_id}", token)
+    if result.get("error"):
+        return {}
+    return {
+        field.get("label"): field.get("type")
+        for field in ((result.get("data") or {}).get("fields") or [])
+        if field.get("label") and field.get("type")
+    }
+
+
+def _build_requirement_field(label: str, value: Any, field_types: dict[str, str]) -> dict[str, Any]:
+    """Build a create payload field using the project's field type."""
+    field_type = field_types.get(label)
+    if not field_type:
+        field_type = "menuItem" if label in {"Importance", "Release", "Product", "Difficulty", "Risk"} else "string"
+    field = {"label": label, "type": field_type}
+    if field_type == "menuItem":
+        field["menuItem"] = {"label": str(value)}
+    elif field_type == "formattedString":
+        field["formattedString"] = _build_formatted_string_payload(str(value))
+    elif field_type == "user":
+        field["user"] = {"username": str(value)}
+    elif field_type == "userArray":
+        field["userArray"] = value if isinstance(value, list) else []
+    else:
+        field[field_type] = value
+    return field
 
 
 def _format_requirement(req: dict) -> dict:
@@ -1505,7 +1547,7 @@ def get_field_values(
 def create_requirement(project_name: str = "", summary: str = "", description: str = "",
                        requirement_type: str = "Functional Requirement",
                        priority: str = "",
-                       additional_fields: str = "") -> str:
+                       additional_fields: dict[str, Any] | None = None) -> str:
     """Create a new requirement in a Helix ALM project.
 
     IMPORTANT: If this requirement will be added to a requirement document,
@@ -1518,7 +1560,8 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
         description: Detailed description of the requirement.
         requirement_type: Requirement type label (e.g. "Business Requirement", "Functional Requirement", "Non-Functional Requirement"). Use get_requirement_types to see available types.
         priority: Priority level (e.g. "High", "Medium", "Low"). Must match project config.
-        additional_fields: JSON string of extra fields to set, e.g. '{"Category": "Security"}'.
+        additional_fields: Dictionary of extra fields to set, e.g.
+                           {"Importance": "Must", "Release": "<= 2021.3"}.
     """
     project_name = _resolve_project(project_name)
     if not project_name:
@@ -1546,28 +1589,17 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
             "type": "formattedString",
             "formattedString": _build_formatted_string_payload(description),
         })
+    field_types = _requirement_field_types(project_name, token)
     if priority:
-        body["fields"].append({
-            "label": "Priority",
-            "type": "menuItem",
-            "menuItem": {"label": priority},
-        })
+        body["fields"].append(_build_requirement_field("Priority", priority, field_types))
 
     # Apply any additional fields
-    if additional_fields:
-        try:
-            extras = json.loads(additional_fields)
-            for label, value in extras.items():
-                if not any(f["label"] == label for f in body["fields"]):
-                    body["fields"].append({
-                        "label": label,
-                        "type": "string",
-                        "string": value,
-                    })
-                else:
-                    _set_field(body["fields"], label, value)
-        except json.JSONDecodeError:
-            return "Error: additional_fields must be a valid JSON string."
+    if additional_fields is not None:
+        if not isinstance(additional_fields, dict):
+            return "Error: additional_fields must be a dictionary."
+        for label, value in additional_fields.items():
+            if not any(f["label"] == label for f in body["fields"]):
+                body["fields"].append(_build_requirement_field(label, value, field_types))
 
     # API expects body wrapped in a "requirements" array
     wrapped_body = {"requirements": [body]}

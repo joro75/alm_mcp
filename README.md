@@ -168,6 +168,19 @@ Discover the values currently in use for a specific field on requirements or tes
 | `search_requirements` | Full-text search across Summary and Description fields |
 | `get_requirement_workflow_events` | List the workflow events currently available for a requirement |
 
+#### `create_requirement` arguments
+
+`additional_fields` is a JSON object whose keys are Helix field labels. It can
+be used for project-specific mandatory fields, for example:
+
+```json
+{"Importance": "Must", "Release": "<= 2021.3"}
+```
+
+The server reads the field types from an existing requirement and encodes menu
+fields as `menuItem` values, so required fields are sent in the shape expected
+by the Helix ALM API.
+
 **Example — create a requirement:**
 ```
 Create a functional requirement in "My Project" with summary "User login via SSO"
