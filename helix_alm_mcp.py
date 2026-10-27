@@ -1555,9 +1555,9 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
                        additional_fields: dict[str, Any] | None = None) -> str:
     """Create a new requirement in a Helix ALM project.
 
-    IMPORTANT: If this requirement will be added to a requirement document,
-    you MUST call create_document_snapshot for that document BEFORE making
-    this change so a point-in-time baseline exists.
+    If this requirement will be added to a requirement document, callers may
+    create a document snapshot first when their process requires a baseline.
+    Snapshot creation is optional and is not required by this tool.
 
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
@@ -2909,8 +2909,8 @@ def add_to_document_tree(project_name: str = "", document_identifier: str = "",
                          requirement_identifiers: str = "") -> str:
     """Add one or more requirements as child nodes under a parent node in a document tree.
 
-    IMPORTANT: You MUST call create_document_snapshot for this document BEFORE
-    making this change so a point-in-time baseline exists.
+    A document snapshot may be created first when the caller's process requires
+    a baseline. Snapshot creation is optional and is not required by this tool.
 
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
@@ -2986,8 +2986,8 @@ def add_to_document_tree_top_level(project_name: str = "", document_identifier: 
                                    requirement_identifiers: str = "") -> str:
     """Add one or more requirements as top-level nodes in a document tree.
 
-    IMPORTANT: You MUST call create_document_snapshot for this document BEFORE
-    making this change so a point-in-time baseline exists.
+    A document snapshot may be created first when the caller's process requires
+    a baseline. Snapshot creation is optional and is not required by this tool.
 
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
