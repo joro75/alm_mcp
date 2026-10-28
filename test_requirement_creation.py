@@ -229,6 +229,57 @@ class RequirementCreationPayloadTests(unittest.TestCase):
         self.assertNotIn("summary", tree[0])
         request.assert_not_called()
 
+    def test_description_length_options_and_truncation_notice(self):
+        description = "A" * 301
+        self.assertEqual(server._limit_description(description, 0), description)
+        self.assertEqual(server._limit_description(description, None), description)
+        self.assertEqual(server._limit_description("short", 300), "short")
+
+        truncated = server._limit_description(description, 300)
+        self.assertTrue(truncated.startswith("A" * 300))
+        self.assertTrue(truncated.endswith(server._DESCRIPTION_TRUNCATION_NOTICE))
+        self.assertEqual(
+            truncated,
+            "A" * 300 + " ... [TRUNCATED DESCRIPTION. Call `get_requirement` for the full description]",
+        )
+
+        custom_limit = server._limit_description(description, 10)
+        self.assertEqual(
+            custom_limit,
+            "A" * 10 + " ... [TRUNCATED DESCRIPTION. Call `get_requirement` for the full description]",
+        )
+
+    def test_negative_description_length_is_rejected(self):
+        with self.assertRaises(ValueError):
+            server._limit_description("description", -1)
+
+    def test_tree_builder_applies_custom_description_length(self):
+        description = "A longer requirement description"
+        nodes = [{
+            "id": 40,
+            "outlineNumber": "4.5",
+            "requirementID": 3015,
+            "tag": "BR-3015",
+            "childNodes": {"childNodesData": []},
+        }]
+
+        def fake_request(path, token=None, body=None, method="GET"):
+            return {"status": 200, "data": {
+                "requirementType": {"label": "Business Requirement"},
+                "fields": [{"label": "Description", "type": "formattedString", "formattedString": {"text": description}}],
+            }}
+
+        with patch.object(server, "_request", side_effect=fake_request):
+            tree = server._build_tree_recursive(
+                "RadiMation", "test-token", 65, None, 0, 3, nodes,
+                max_description_length=10,
+            )
+
+        self.assertEqual(
+            tree[0]["description"],
+            "A longer r ... [TRUNCATED DESCRIPTION. Call `get_requirement` for the full description]",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

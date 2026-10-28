@@ -2680,10 +2680,27 @@ def _resolve_suite_id(project_name: str, token: str, identifier: str) -> int | N
     return None
 
 
+_DESCRIPTION_TRUNCATION_NOTICE = (
+    " ... [TRUNCATED DESCRIPTION. Call `get_requirement` for the full description]"
+)
+
+
+def _limit_description(description: str, max_description_length: int | None) -> str:
+    """Limit a plain-text description and identify intentional truncation."""
+    if max_description_length is None or max_description_length == 0:
+        return description
+    if max_description_length < 0:
+        raise ValueError("max_description_length must be 0, positive, or None")
+    if len(description) <= max_description_length:
+        return description
+    return description[:max_description_length] + _DESCRIPTION_TRUNCATION_NOTICE
+
+
 def _build_tree_recursive(proj: str, token: str, tree_id: int,
                           node_id: int | None, depth: int, max_depth: int,
                           nodes: list | None = None,
-                          include_requirement_details: bool = True) -> list:
+                          include_requirement_details: bool = True,
+                          max_description_length: int | None = 300) -> list:
     """Recursively build a tree of nodes with requirement details."""
     if depth > max_depth:
         return []
@@ -2723,7 +2740,9 @@ def _build_tree_recursive(proj: str, token: str, tree_id: int,
                 desc = _get_field(fields, "Description") or ""
                 desc_clean = re.sub(r"<[^>]+>", " ", desc).strip()
                 desc_clean = re.sub(r"\s+", " ", desc_clean)
-                entry["description"] = desc_clean[:300]
+                entry["description"] = _limit_description(
+                    desc_clean, max_description_length
+                )
 
         # Recurse into children
         expanded_children = (node.get("childNodes") or {}).get("childNodesData")
@@ -2731,6 +2750,7 @@ def _build_tree_recursive(proj: str, token: str, tree_id: int,
             proj, token, tree_id, node["id"], depth + 1, max_depth,
             expanded_children if expanded_children is not None else None,
             include_requirement_details,
+            max_description_length,
         )
         if children:
             entry["children"] = children
@@ -2828,7 +2848,8 @@ def create_document(project_name: str = "", name: str = "") -> str:
 @mcp.tool()
 def get_document_tree(project_name: str = "", document_identifier: str = "",
                       max_depth: int = 3,
-                      include_requirement_details: bool = True) -> str:
+                      include_requirement_details: bool = True,
+                      max_description_length: int | None = 300) -> str:
     """Get the hierarchical tree structure of a requirement document, showing all
     sections and requirements organized in their outline order.
 
@@ -2841,6 +2862,9 @@ def get_document_tree(project_name: str = "", document_identifier: str = "",
                                          true for backwards compatibility. Set false
                                          to return only document-tree information and
                                          avoid one requirement lookup per node.
+        max_description_length: Maximum description length before appending a
+                                truncation notice. Defaults to 300 for backwards
+                                compatibility. Use 0 or None for the full description.
     """
     project_name = _resolve_project(project_name)
     if not project_name:
@@ -2865,6 +2889,7 @@ def get_document_tree(project_name: str = "", document_identifier: str = "",
     tree = _build_tree_recursive(
         proj, token, doc_id, None, 0, max_depth,
         include_requirement_details=include_requirement_details,
+        max_description_length=max_description_length,
     )
 
     return json.dumps({
@@ -3071,7 +3096,8 @@ def add_to_document_tree_top_level(project_name: str = "", document_identifier: 
 
 
 @mcp.tool()
-def get_document_requirements(project_name: str = "", document_name: str = "") -> str:
+def get_document_requirements(project_name: str = "", document_name: str = "",
+                              max_description_length: int | None = 300) -> str:
     """Get all requirements that belong to a specific requirement document, grouped by type.
     This reports the requirements associated with the document, including their
     document-tree membership.
@@ -3079,6 +3105,9 @@ def get_document_requirements(project_name: str = "", document_name: str = "") -
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
         document_name: The document name (or partial name) to match in the Document List field.
+        max_description_length: Maximum description length before appending a
+                                truncation notice. Defaults to 300 for backwards
+                                compatibility. Use 0 or None for the full description.
     """
     project_name = _resolve_project(project_name)
     if not project_name:
@@ -3126,7 +3155,9 @@ def get_document_requirements(project_name: str = "", document_name: str = "") -
                 "summary": _get_field(fields, "Summary") or "",
                 "priority": _get_field(fields, "Priority") or "",
                 "status": _get_field(fields, "Status") or "",
-                "description": desc_clean[:300],
+                "description": _limit_description(
+                    desc_clean, max_description_length
+                ),
             })
 
         paging = data.get("paging") or {}
