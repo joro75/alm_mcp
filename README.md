@@ -24,7 +24,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that c
 ## Requirements
 
 - Python 3.11+
-- [`mcp`](https://pypi.org/project/mcp/) package (`pip install mcp`)
+- [`mcp`](https://pypi.org/project/mcp/) package, version `1.30.0` (MCP SDK 2.x is not currently supported)
 - A running Perforce ALM server (formerly Helix ALM, v24 or later recommended) with the REST API enabled
 - An API token (recommended) or username/password
 
@@ -33,9 +33,9 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that c
 ## Installation
 
 ```bash
-git clone https://github.com/gerhardkrugerdev/alm_mcp.git
+git clone https://github.com/joro75/alm_mcp.git
 cd alm_mcp
-pip install mcp
+python -m pip install -r requirements.txt
 ```
 
 Copy the example environment file and fill in your details (optional — you can also configure everything through the `configure_helix_alm` tool at runtime):
