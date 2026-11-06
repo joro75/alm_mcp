@@ -139,15 +139,22 @@ Set the default project for the session. Once set, all tools that accept `projec
 | `project_name` | Name of the Helix ALM project to use as the default |
 
 #### `get_field_values`
-Discover the values currently in use for a specific field on requirements or test cases. Useful for finding valid Priority, Status, Category, or other menu field values before creating or updating items.
+Read the configured menu options for a field, including values unused by existing records. The tool queries configuration endpoints rather than sampling items.
 
 | Argument | Description |
 |----------|-------------|
 | `project_name` | Helix ALM project (uses default if omitted) |
-| `item_type` | `"requirements"` or `"testCases"` |
-| `field_label` | Field name to discover values for (e.g. `"Priority"`, `"Status"`, `"Category"`) |
+| `item_type` | `"requirements"` (default), `"issues"` or `"documents"` |
+| `field_label` | Configured field name, such as `"Importance"`, `"Release"` or `"Product"` |
 
-> **Note:** This discovers values from existing items, so values that haven't been used yet may not appear. If the field name is not found, the tool returns the list of available field labels.
+Non-menu fields return their definition with `values: null`; this does not mean an empty menu. User fields expose their permitted user types and scope. Status fields are read-only and require workflow operations. An unknown field returns the configured field labels.
+
+#### `get_field_definitions`
+Read all system and custom field definitions for requirements, issues or documents. The response includes API output types, editability, required fields, defaults, selection rules, overrides and complete menu options. `refresh` defaults to `true` so configuration changes can be read immediately.
+
+Requirement creation and updates use these definitions to encode additional fields. For example, `additional_fields='{"Importance":"May","Release":"Future"}'` sends menu selections rather than strings. Menu values can be labels, IDs or objects containing an ID or label. Multi-select values are arrays; user values are usernames or user objects. An optional menu or user field can be cleared with JSON `null`, and multi-select fields with an empty array. Unknown fields, read-only fields and invalid menu options are rejected before a write request.
+
+The legacy `priority` argument targets `Priority` when configured, otherwise `Importance`. Discover its options before supplying a value. `get_requirement_types` reads all configured types, including unused or inactive types; creation accepts active types only.
 
 ---
 
