@@ -230,6 +230,12 @@ def _serialise_configured_field(project_name: str, token: str,
     if not definition.get("editable"):
         raise ValueError(f"Field '{label}' is read-only; use its dedicated operation")
     output_type = definition["outputType"]
+    # A configured menu can expose a scalar outputType while the item API still
+    # expects a menuItem value. Version Found is the common example: its values
+    # are free-form strings, but its field is represented as a menu in config.
+    free_form_menu = (definition.get("type") == "menu"
+                      and output_type == "string")
+
     settings = definition.get(definition["type"], {})
     if settings.get("required") and (value is None or value == "" or value == []):
         raise ValueError(f"Field '{label}' is required")
@@ -251,7 +257,11 @@ def _serialise_configured_field(project_name: str, token: str,
             raise ValueError(f"Invalid value for '{label}': {item!r}. Options: {options}")
         return {"id": matches[0]["id"], "label": matches[0]["label"]}
 
-    if output_type in ("menuItem", "menuItemArray"):
+    if free_form_menu:
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"Field '{label}' needs text")
+        encoded = value
+    elif output_type in ("menuItem", "menuItemArray"):
         if value is None:
             encoded = {"id": 0, "label": ""} if output_type == "menuItem" else []
         elif output_type == "menuItemArray":
@@ -297,7 +307,13 @@ def _serialise_configured_field(project_name: str, token: str,
         encoded = value
     else:
         raise ValueError(f"Field '{label}' has unsupported output type '{output_type}'")
-    return {"label": label, "type": output_type, output_type: encoded}
+    field = {"label": label, "type": output_type, output_type: encoded}
+    # The create API needs the field record ID for configured/system fields.
+    # Configuration outputType describes the value encoding, while the field ID
+    # identifies the actual field (important for fields such as Version Found).
+    if definition.get("id") is not None:
+        field["id"] = definition["id"]
+    return field
 
 
 def _requirement_field_payload(project_name: str, token: str, values: dict,
@@ -1553,7 +1569,17 @@ def create_issue(project_name: str = "", summary: str = "", description: str = "
     except (ValueError, TypeError) as error:
         return f"Error: {error}"
 
-    body = {"fields": fields}
+    # The issue POST endpoint identifies fields by label and value property.
+    # Unlike configuration responses, its documented create example omits both
+    # the metadata ``type`` and configuration field ``id``.  Some ALM versions
+    # silently ignore values for required fields when those metadata keys are
+    # included, then return a misleading 206 "required field" response.
+    issue_fields = []
+    for field in fields:
+        issue_field = {key: value for key, value in field.items()
+                       if key != "type"}
+        issue_fields.append(issue_field)
+    body = {"fields": issue_fields}
     result = _request(f"{_encode_project(project_name)}/issues", token,
                       {"issues": [body]}, "POST")
     data = result.get("data", {})
