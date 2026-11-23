@@ -44,7 +44,6 @@ class IssueCreationTests(unittest.TestCase):
         fields = {field["label"]: field for field in payload["issues"][0]["fields"]}
         self.assertEqual(fields["Category"]["menuItem"], {"id": 3, "label": "Investigation"})
         self.assertEqual(fields["Summary"]["string"], "Investigate failure")
-        self.assertEqual(fields["Summary"]["string"], "Investigate failure")
         self.assertNotIn("type", fields["Category"])
         self.assertNotIn("id", fields["Category"])
         self.assertEqual(request.call_args.args[0], "Demo/issues")
@@ -128,6 +127,126 @@ class IssueCreationTests(unittest.TestCase):
         self.assertEqual(found_by["versionFound"], "3.3.x")
         self.assertEqual(found_by["foundBy"], {"username": "joro"})
         self.assertEqual(found_by["description"]["text"], "Description")
+
+    def test_all_found_by_properties_are_split_and_encoded(self):
+        definitions = [
+            {"label": "Summary", "editable": True, "type": "singleLineString",
+             "outputType": "string", "singleLineString": {"required": True}},
+            {"label": "Found by", "editable": True, "type": "userMenu",
+             "outputType": "user", "userMenu": {}},
+            {"label": "Date Found", "editable": True, "type": "date",
+             "outputType": "date", "date": {}},
+            {"label": "Version Found", "editable": True, "type": "menu",
+             "outputType": "string", "menu": {"id": 99}},
+            {"label": "Description", "editable": True, "type": "multiLineString",
+             "outputType": "formattedString", "multiLineString": {}},
+            {"label": "Steps to Reproduce", "editable": True, "type": "multiLineString",
+             "outputType": "formattedString", "multiLineString": {}},
+            {"label": "Reproduced", "editable": True, "type": "menu",
+             "outputType": "menuItem", "menu": {"id": 11}},
+        ]
+        responses = [
+            {"data": {"itemsData": [{"id": 1, "label": "Always"}]}},
+            {"status": 201, "data": {"issues": [{"id": 42, "tag": "#-42", "fields": []}]}},
+        ]
+        values = {
+            "Found by": {"username": "joro"},
+            "Date Found": "2026-11-23",
+            "Version Found": "3.3.x",
+            "Description": "<p>HTML description</p>",
+            "Steps to Reproduce": "Step one",
+            "Reproduced": "Always",
+        }
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request", side_effect=responses) as request:
+            server.create_issue("Demo", "Summary", additional_fields=values)
+        issue = request.call_args.args[2]["issues"][0]
+        self.assertEqual([f["label"] for f in issue["fields"]], ["Summary"])
+        found_by = issue["foundByRecords"]["foundByRecordsData"][0]
+        self.assertEqual(found_by["foundBy"], {"username": "joro"})
+        self.assertEqual(found_by["dateFound"], "2026-11-23")
+        self.assertEqual(found_by["versionFound"], "3.3.x")
+        self.assertTrue(found_by["description"]["isFormatted"])
+        self.assertEqual(found_by["steps"]["text"], "Step one")
+        self.assertEqual(found_by["reproduced"], {"id": 1, "label": "Always"})
+
+    def test_plain_description_is_unformatted_and_html_is_formatted(self):
+        self.assertEqual(
+            server._build_formatted_string_payload("plain"),
+            {"isFormatted": False, "text": "plain"},
+        )
+        self.assertEqual(
+            server._build_formatted_string_payload("<p>html</p>"),
+            {"isFormatted": True, "text": "<p>html</p>"},
+        )
+
+    def test_empty_required_found_by_description_is_rejected_before_posting(self):
+        definitions = self.definitions()
+        definitions[1]["multiLineString"]["required"] = True
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request") as request:
+            result = server.create_issue("Demo", "Summary", description="")
+        self.assertIn("Description", result)
+        request.assert_not_called()
+
+    def test_invalid_found_by_user_is_rejected_before_posting(self):
+        definitions = self.definitions() + [{
+            "label": "Found by", "editable": True, "type": "userMenu",
+            "outputType": "user", "userMenu": {},
+        }]
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request") as request:
+            result = server.create_issue("Demo", "Summary",
+                                         additional_fields={"Found by": 123})
+        self.assertIn("needs a username or user object", result)
+        request.assert_not_called()
+
+    def test_partial_create_with_created_issue_reports_warnings(self):
+        definitions = self.definitions()
+        response = {
+            "status": 206, "error": True,
+            "data": {"issues": [{"id": 42, "tag": "#-42", "fields": []}],
+                     "errors": [{"message": "Optional field ignored"}]},
+        }
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request", side_effect=[
+                 {"data": {"itemsData": [{"id": 3, "label": "Investigation"}]}},
+                 response,
+             ]):
+            result = json.loads(server.create_issue(
+                "Demo", "Summary", description="Details",
+                additional_fields={"Category": "Investigation"}))
+        self.assertEqual(result["message"], "Issue created with warnings")
+        self.assertEqual(result["warnings"][0]["message"], "Optional field ignored")
+
+    def test_partial_create_without_issue_returns_error_without_claiming_success(self):
+        definitions = self.definitions()
+        response = {"status": 206, "error": True,
+                    "data": {"issues": [], "errors": [{"message": "Required"}]}}
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request", side_effect=[
+                 {"data": {"itemsData": [{"id": 3, "label": "Investigation"}]}},
+                 response,
+             ]):
+            result = server.create_issue(
+                "Demo", "Summary", description="Details",
+                additional_fields={"Category": "Investigation"})
+        self.assertIn("Could not create the issue", result)
+        self.assertNotIn("created successfully", result)
+
+    def test_unknown_field_is_rejected_before_posting(self):
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=self.definitions()), \
+             patch.object(server, "_request") as request:
+            result = server.create_issue("Demo", "Summary",
+                                         additional_fields={"Not a field": "x"})
+        self.assertIn("Unknown issues fields", result)
+        request.assert_not_called()
 
 
 if __name__ == "__main__":
