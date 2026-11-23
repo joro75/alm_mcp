@@ -1579,7 +1579,36 @@ def create_issue(project_name: str = "", summary: str = "", description: str = "
         issue_field = {key: value for key, value in field.items()
                        if key != "type"}
         issue_fields.append(issue_field)
+    found_by_labels = {
+        "Found by", "Date Found", "Version Found", "Description",
+        "Reproduced", "Steps to Reproduce", "Other Hardware and Software",
+    }
+    found_by_values = {label: values[label] for label in found_by_labels
+                       if label in values}
+    issue_fields = [field for field in issue_fields
+                    if field.get("label") not in found_by_labels]
     body = {"fields": issue_fields}
+    if found_by_values:
+        found_by = {}
+        if "Found by" in found_by_values:
+            found_by_field = next(field for field in fields
+                                  if field.get("label") == "Found by")
+            found_by["foundBy"] = found_by_field.get("user", {})
+        if "Version Found" in found_by_values:
+            found_by["versionFound"] = found_by_values["Version Found"]
+        if "Date Found" in found_by_values:
+            found_by["dateFound"] = found_by_values["Date Found"]
+        if "Description" in found_by_values:
+            found_by["description"] = _build_formatted_string_payload(
+                found_by_values["Description"])
+        if "Steps to Reproduce" in found_by_values:
+            found_by["steps"] = _build_formatted_string_payload(
+                found_by_values["Steps to Reproduce"])
+        if "Reproduced" in found_by_values:
+            reproduced = next(field for field in fields
+                              if field.get("label") == "Reproduced")
+            found_by["reproduced"] = reproduced.get("menuItem", {})
+        body["foundByRecords"] = {"foundByRecordsData": [found_by]}  # type: ignore[reportArgumentType]
     result = _request(f"{_encode_project(project_name)}/issues", token,
                       {"issues": [body]}, "POST")
     data = result.get("data", {})
