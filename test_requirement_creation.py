@@ -9,19 +9,30 @@ import helix_alm_mcp as server
 class RequirementCreationPayloadTests(unittest.TestCase):
     def setUp(self):
         self.posted_body = None
+        state = patch.dict(server._session, {
+            "helix_field_definitions": {}, "helix_menu_items": {},
+        })
+        state.start()
+        self.addCleanup(state.stop)
+
+    def configuration_responses(self):
+        return [
+            {"data": {"systemFieldsData": [{
+                "label": "Summary", "editable": True, "type": "singleLineString",
+                "outputType": "string", "singleLineString": {"required": True},
+            }]}},
+            {"data": {"customFieldsData": [
+                {"label": label, "editable": True, "type": "menu",
+                 "outputType": "menuItem", "menu": {"id": menu_id}}
+                for label, menu_id in (("Importance", 11), ("Release", 12))
+            ]}},
+        ]
 
     def test_required_menu_fields_are_encoded_and_type_is_preserved(self):
-        responses = [
-            {"status": 200, "data": {"requirements": [{"id": 1}]}},
-            {
-                "status": 200,
-                "data": {
-                    "fields": [
-                        {"label": "Importance", "type": "menuItem"},
-                        {"label": "Release", "type": "menuItem"},
-                    ]
-                },
-            },
+        responses = self.configuration_responses() + [
+            {"data": {"itemsData": [{"id": 1, "label": "Must"}]}},
+            {"data": {"itemsData": [{"id": 2, "label": "<= 2021.3"}]}},
+            {"data": {"requirementTypesData": [{"id": 3, "label": "Business Requirement"}]}},
             {
                 "status": 201,
                 "data": {
@@ -60,11 +71,11 @@ class RequirementCreationPayloadTests(unittest.TestCase):
             for field in posted_body["requirements"][0]["fields"]
         }
         self.assertEqual(fields["Importance"]["type"], "menuItem")
-        self.assertEqual(fields["Importance"]["menuItem"], {"label": "Must"})
-        self.assertEqual(fields["Release"]["menuItem"], {"label": "<= 2021.3"})
+        self.assertEqual(fields["Importance"]["menuItem"], {"id": 1, "label": "Must"})
+        self.assertEqual(fields["Release"]["menuItem"], {"id": 2, "label": "<= 2021.3"})
         self.assertEqual(
             self.posted_body["requirements"][0]["requirementType"],
-            {"label": "Business Requirement"},
+            {"id": 3, "label": "Business Requirement"},
         )
 
     def test_supported_field_types_are_encoded(self):
@@ -119,9 +130,8 @@ class RequirementCreationPayloadTests(unittest.TestCase):
         )
 
     def test_partial_create_response_reports_warnings(self):
-        responses = [
-            {"status": 200, "data": {"requirements": [{"id": 1}]}},
-            {"status": 200, "data": {"fields": []}},
+        responses = self.configuration_responses() + [
+            {"data": {"requirementTypesData": [{"id": 4, "label": "Functional Requirement"}]}},
             {
                 "status": 206,
                 "error": True,

@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.error
 import logging
 from typing import Any
+from copy import deepcopy
 from time import sleep
 from time import time, mktime
 from datetime import datetime, timezone
@@ -158,6 +159,160 @@ def _ensure_project_menus_loaded(project_name: str, token: str) -> None:
     is first obtained, so menu caching is established before field-to-menu lookups.
     """
     _load_project_menus(project_name, token)
+
+
+_FIELD_ITEM_TYPES = {
+    "requirements": "requirementFields",
+    "issues": "issueFields",
+    "documents": "documentFields",
+}
+
+
+def _configured_fields(project_name: str, token: str, item_type: str,
+                       refresh: bool = False) -> list[dict]:
+    """Read field definitions, retaining API types, defaults and overrides."""
+    if item_type not in _FIELD_ITEM_TYPES:
+        raise ValueError("item_type must be requirements, issues or documents")
+    cache = _session.setdefault("helix_field_definitions", {})
+    key = (project_name, item_type)
+    if not refresh and key in cache:
+        return deepcopy(cache[key])
+    fields = []
+    for kind in ("systemFields", "customFields"):
+        path = (f"{_encode_project(project_name)}/configs/fields/"
+                f"{_FIELD_ITEM_TYPES[item_type]}/{kind}")
+        result = _request(path, token)
+        if result.get("error"):
+            raise ValueError(_friendly_error(result, "get configured fields"))
+        data = result.get("data", {})
+        if not isinstance(data.get(f"{kind}Data"), list):
+            raise ValueError(f"Missing {kind}Data in field configuration response")
+        fields.extend(data[f"{kind}Data"])
+    cache[key] = deepcopy(fields)
+    return fields
+
+
+def _configured_menu_items(project_name: str, token: str, menu_id: int,
+                           refresh: bool = False) -> list[dict]:
+    """Get the complete configured menu, including values unused by records."""
+    cache = _session.setdefault("helix_menu_items", {})
+    key = (project_name, menu_id)
+    if not refresh and key in cache:
+        return deepcopy(cache[key])
+    result = _request(
+        f"{_encode_project(project_name)}/configs/menus/{menu_id}/items", token)
+    if result.get("error"):
+        raise ValueError(_friendly_error(result, "get configured menu items"))
+    items = result.get("data", {}).get("itemsData")
+    if not isinstance(items, list):
+        raise ValueError("Missing itemsData in menu configuration response")
+    cache[key] = deepcopy(items)
+    return items
+
+
+def _configured_requirement_types(project_name: str, token: str) -> list[dict]:
+    """Read all configured requirement types instead of sampling records."""
+    result = _request(
+        f"{_encode_project(project_name)}/configs/requirementTypes", token)
+    if result.get("error"):
+        raise ValueError(_friendly_error(result, "get configured requirement types"))
+    types = result.get("data", {}).get("requirementTypesData")
+    if not isinstance(types, list):
+        raise ValueError("Missing requirementTypesData in configuration response")
+    return [{key: value for key, value in item.items() if key != "icon"}
+            for item in types]
+
+
+def _serialise_configured_field(project_name: str, token: str,
+                                definition: dict, value) -> dict:
+    """Encode a value with the field's configured API output type."""
+    label = definition["label"]
+    if not definition.get("editable"):
+        raise ValueError(f"Field '{label}' is read-only; use its dedicated operation")
+    output_type = definition["outputType"]
+    settings = definition.get(definition["type"], {})
+    if settings.get("required") and (value is None or value == "" or value == []):
+        raise ValueError(f"Field '{label}' is required")
+
+    def menu_item(item):
+        if not isinstance(item, (str, int, dict)) or isinstance(item, bool):
+            raise ValueError(f"Field '{label}' needs a menu label or ID")
+        menu_id = definition.get("menu", {}).get("id")
+        if menu_id is None:
+            raise ValueError(f"Field '{label}' needs its dedicated operation")
+        configured = _configured_menu_items(project_name, token, menu_id)
+        identity = ({"label": item} if isinstance(item, str) else
+                    {"id": item} if isinstance(item, int) else item)
+        keys = set(identity) & {"id", "label"}
+        matches = [candidate for candidate in configured if keys and
+                   all(candidate.get(key) == identity[key] for key in keys)]
+        if len(matches) != 1:
+            options = [candidate.get("label") for candidate in configured]
+            raise ValueError(f"Invalid value for '{label}': {item!r}. Options: {options}")
+        return {"id": matches[0]["id"], "label": matches[0]["label"]}
+
+    if output_type in ("menuItem", "menuItemArray"):
+        if value is None:
+            encoded = {"id": 0, "label": ""} if output_type == "menuItem" else []
+        elif output_type == "menuItemArray":
+            if not isinstance(value, list):
+                raise ValueError(f"Field '{label}' needs an array of menu selections")
+            encoded = [menu_item(item) for item in value]
+        else:
+            encoded = menu_item(value)
+    elif output_type == "formattedString":
+        if not isinstance(value, str):
+            raise ValueError(f"Field '{label}' needs text")
+        encoded = _build_formatted_string_payload(value)
+    elif output_type in ("user", "userArray"):
+        def user(item):
+            if isinstance(item, str):
+                return {"username": item}
+            if isinstance(item, dict) and ("id" in item or item.get("username")):
+                return item
+            raise ValueError(f"Field '{label}' needs a username or user object")
+        if output_type == "userArray":
+            if not isinstance(value, list):
+                raise ValueError(f"Field '{label}' needs an array of users")
+            encoded = [user(item) for item in value]
+        else:
+            encoded = {"id": 0, "username": "", "firstName": "", "lastName": "", "mi": ""} if value is None else user(value)
+    elif output_type in ("string", "date", "dateTime"):
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"Field '{label}' needs text")
+        if output_type == "string":
+            limit = settings.get("length", -1)
+            if limit >= 0 and len(value or "") > limit:
+                raise ValueError(f"Field '{label}' has a maximum length of {limit}")
+        encoded = value
+    elif output_type == "boolean":
+        if not isinstance(value, bool):
+            raise ValueError(f"Field '{label}' needs true or false")
+        encoded = value
+    elif output_type in ("integer", "decimal"):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"Field '{label}' needs a number")
+        if output_type == "integer" and not isinstance(value, int):
+            raise ValueError(f"Field '{label}' needs an integer")
+        encoded = value
+    else:
+        raise ValueError(f"Field '{label}' has unsupported output type '{output_type}'")
+    return {"label": label, "type": output_type, output_type: encoded}
+
+
+def _requirement_field_payload(project_name: str, token: str, values: dict,
+                               priority: str = "") -> tuple[list[dict], list[dict]]:
+    """Validate field labels and encode each value using project metadata."""
+    definitions = _configured_fields(project_name, token, "requirements")
+    by_label = {field["label"]: field for field in definitions}
+    if priority:
+        priority_label = "Priority" if "Priority" in by_label else "Importance"
+        values.setdefault(priority_label, priority)
+    unknown = set(values) - set(by_label)
+    if unknown:
+        raise ValueError(f"Unknown requirement fields: {sorted(unknown)}")
+    return ([_serialise_configured_field(project_name, token, by_label[label], value)
+             for label, value in values.items()], definitions)
 
 
 def _parse_int_header(value):
@@ -1019,6 +1174,9 @@ def configure_helix_alm(
     _session["helix_alm_api_secret"] = api_secret
     _session["helix_alm_ssl_verify"] = ssl_verify
     _session["helix_project_tokens"] = {}
+    _session["helix_project_menus"] = {}
+    _session["helix_field_definitions"] = {}
+    _session["helix_menu_items"] = {}
     if default_project:
         _session["default_project"] = default_project
 
@@ -1444,9 +1602,7 @@ def download_attachment(
 
 @mcp.tool()
 def get_requirement_types(project_name: str = "") -> str:
-    """Get the requirement types currently in use in a project (e.g. Business Requirement,
-    Functional Requirement). Note: this discovers types from existing requirements, so types
-    that haven't been used yet may not appear.
+    """Get all configured requirement types, including unused and inactive types.
 
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
@@ -1458,21 +1614,41 @@ def get_requirement_types(project_name: str = "") -> str:
     if not token:
         return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
 
-    proj = _encode_project(project_name)
-    # Fetch with minimal columns — requirementType is a top-level field, always included
-    result = _request(f"{proj}/requirements?fields={urllib.parse.quote('Tag')}", token)
-    if result.get("error"):
-        return _friendly_error(result, "get requirement types")
+    try:
+        return json.dumps({"source": "configuration", "requirement_types":
+                           _configured_requirement_types(project_name, token)}, indent=2)
+    except ValueError as error:
+        return f"Error: {error}"
 
-    types_seen = {}
-    for req in result["data"].get("requirements", []):
-        rt = req.get("requirementType", {})
-        if rt and rt.get("label"):
-            types_seen[rt["label"]] = rt.get("id")
 
-    return json.dumps({"requirement_types": [
-        {"label": label, "id": rid} for label, rid in types_seen.items()
-    ]}, indent=2)
+@mcp.tool()
+def get_field_definitions(project_name: str = "", item_type: str = "requirements",
+                          refresh: bool = True) -> str:
+    """Get configured fields with API types, editability, defaults and menu options.
+
+    item_type supports requirements, issues and documents. Menu values come from
+    configuration endpoints, not existing records. User fields expose selection
+    scope and user types; they are not fixed menus. Read-only fields need their
+    dedicated operations. Overrides are returned without flattening them.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    token = _get_token(project_name)
+    if not token:
+        return "Error: Could not obtain a project access token"
+    try:
+        fields = _configured_fields(project_name, token, item_type, refresh)
+        for field in fields:
+            if field.get("type") == "menu":
+                field["options"] = _configured_menu_items(
+                    project_name, token, field["menu"]["id"], refresh)
+            elif field.get("type") == "subTypeMenu" and item_type == "requirements":
+                field["options"] = _configured_requirement_types(project_name, token)
+        return json.dumps({"project": project_name, "item_type": item_type,
+                           "source": "configuration", "fields": fields}, indent=2)
+    except ValueError as error:
+        return f"Error: {error}"
 
 
 @mcp.tool()
@@ -1481,16 +1657,13 @@ def get_field_values(
     item_type: str = "requirements",
     field_label: str = "",
 ) -> str:
-    """Discover the values currently in use for a specific field on requirements or test cases.
-    Useful for finding valid Priority, Status, Category, or other menu field values before
-    creating or updating items.
+    """Get configured menu options, including values unused by existing records.
 
-    Note: this discovers values from existing items, so values that haven't been used yet
-    may not appear.
+    Non-menu fields return their definition and no finite list of options.
 
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
-        item_type: The type of item to scan — 'requirements' or 'testCases'.
+        item_type: requirements, issues or documents.
         field_label: The field name to discover values for (e.g. 'Priority', 'Status', 'Category', 'Type').
     """
     project_name = _resolve_project(project_name)
@@ -1498,54 +1671,31 @@ def get_field_values(
         return _no_project_msg()
     if not field_label:
         return "Error: field_label is required. Examples: 'Priority', 'Status', 'Category', 'Type'."
-    if item_type not in ("requirements", "testCases"):
-        return "Error: item_type must be 'requirements' or 'testCases'."
+    if item_type not in _FIELD_ITEM_TYPES:
+        return "Error: item_type must be requirements, issues or documents."
 
     token = _get_token(project_name)
     if not token:
         return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
 
-    proj = _encode_project(project_name)
-    # Request only the specific field column to minimize payload
-    qs = f"?columns={urllib.parse.quote(field_label)}"
-    result = _request(f"{proj}/{item_type}{qs}", token)
-    if result.get("error"):
-        # If the column request fails, retry without column filter
-        result = _request(f"{proj}/{item_type}", token)
-        if result.get("error"):
-            return _friendly_error(result, f"get field values for '{field_label}'")
-
-    items_key = item_type  # API returns {"requirements": [...]} or {"testCases": [...]}
-    items = result["data"].get(items_key, [])
-
-    values_seen = set()
-    field_found = False
-    for item in items:
-        for f in item.get("fields", []):
-            if f.get("label") == field_label:
-                field_found = True
-                val = _get_field(item["fields"], field_label)
-                if val is not None and val != "":
-                    values_seen.add(val)
-
-    if not field_found:
-        # List available field labels to help the user
-        all_labels = set()
-        for item in items[:5]:  # Sample from first few items
-            for f in item.get("fields", []):
-                if f.get("label"):
-                    all_labels.add(f["label"])
-        return json.dumps({
-            "error": f"Field '{field_label}' not found on any {item_type}.",
-            "available_fields": sorted(all_labels),
-        }, indent=2)
-
-    return json.dumps({
-        "field": field_label,
-        "item_type": item_type,
-        "values": sorted(values_seen),
-        "count": len(values_seen),
-    }, indent=2)
+    try:
+        fields = _configured_fields(project_name, token, item_type, refresh=True)
+        field = next((field for field in fields if field["label"] == field_label), None)
+        if field is None:
+            return json.dumps({"error": f"Field '{field_label}' is not configured",
+                               "available_fields": [field["label"] for field in fields]}, indent=2)
+        items = None
+        if field.get("type") == "menu":
+            items = _configured_menu_items(project_name, token, field["menu"]["id"], True)
+        elif field.get("type") == "subTypeMenu" and item_type == "requirements":
+            items = _configured_requirement_types(project_name, token)
+        values = [item["label"] for item in items] if items is not None else None
+        return json.dumps({"field": field_label, "item_type": item_type,
+                           "source": "configuration", "values": values,
+                           "count": len(values) if values is not None else None,
+                           "options": items, "definition": field}, indent=2)
+    except ValueError as error:
+        return f"Error: {error}"
 
 
 @mcp.tool()
@@ -1564,9 +1714,10 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
         summary: The requirement summary/title.
         description: Detailed description of the requirement.
         requirement_type: Requirement type label (e.g. "Business Requirement", "Functional Requirement", "Non-Functional Requirement"). Use get_requirement_types to see available types.
-        priority: Priority level (e.g. "High", "Medium", "Low"). Must match project config.
-        additional_fields: Dictionary of extra fields to set, e.g.
-                           {"Importance": "Must", "Release": "<= 2021.3"}.
+        priority: Configured Priority or Importance value; use get_field_values first.
+        additional_fields: Dictionary of field labels and values. Menu fields accept
+            labels or IDs, user fields accept usernames or user objects, and
+            multi-select fields accept arrays. Use get_field_definitions first.
     """
     project_name = _resolve_project(project_name)
     if not project_name:
@@ -1579,32 +1730,32 @@ def create_requirement(project_name: str = "", summary: str = "", description: s
 
     proj = _encode_project(project_name)
 
-    # Build the requirement body
-    body = {
-        "requirementType": _build_requirement_type_payload(requirement_type),
-        "fields": [
-            {
-                "label": "Summary",
-                "type": "string",
-                "string": summary,
-            },
-        ]
-    }
-    if description:
-        body["fields"].append({
-            "label": "Description",
-            "type": "formattedString",
-            "formattedString": _build_formatted_string_payload(description),
-        })
-    field_types = _requirement_field_types(project_name, token)
-    if priority:
-        body["fields"].append(_build_requirement_field("Priority", priority, field_types))
-
-    # Apply any additional fields
-    if additional_fields is not None:
-        for label, value in additional_fields.items():
-            if not any(f["label"] == label for f in body["fields"]):
-                body["fields"].append(_build_requirement_field(label, value, field_types))
+    try:
+        values = dict(additional_fields or {})
+        if not isinstance(values, dict):
+            raise ValueError("additional_fields must be a JSON object")
+        values.setdefault("Summary", summary)
+        if description:
+            values.setdefault("Description", description)
+        fields, definitions = _requirement_field_payload(project_name, token, values, priority)
+        missing = []
+        for field in definitions:
+            settings = field.get(field["type"], {})
+            if (field.get("editable") and settings.get("required")
+                    and not settings.get("defaultValue")
+                    and (values.get(field["label"]) is None or values.get(field["label"]) == "")):
+                missing.append(field["label"])
+        if missing:
+            raise ValueError(f"Required fields without defaults: {missing}")
+        types = _configured_requirement_types(project_name, token)
+        selected_type = next((item for item in types if item["label"] == requirement_type
+                              and item.get("active", True)), None)
+        if selected_type is None:
+            raise ValueError(f"Unknown or inactive requirement type '{requirement_type}'")
+        body = {"requirementType": {"id": selected_type["id"], "label": requirement_type},
+                "fields": fields}
+    except (ValueError, TypeError) as error:
+        return f"Error: {error}"
 
     # API expects body wrapped in a "requirements" array
     wrapped_body = {"requirements": [body]}
@@ -1646,8 +1797,9 @@ def update_requirement(project_name: str = "", requirement_identifier: str = "",
         requirement_identifier: The requirement tag (e.g. 'BR-1960') or numeric ID.
         summary: New summary (leave empty to keep current).
         description: New description (leave empty to keep current).
-        priority: New priority (leave empty to keep current).
-        additional_fields: JSON string of extra fields to update, e.g. '{"Category": "Security"}'.
+        priority: Configured Priority or Importance value (empty keeps current).
+        additional_fields: JSON object of configured field labels and values.
+            Use get_field_definitions for types and valid menu options.
     """
     project_name = _resolve_project(project_name)
     if not project_name:
@@ -1669,20 +1821,24 @@ def update_requirement(project_name: str = "", requirement_identifier: str = "",
     req = get_result["data"]
     fields = req.get("fields", [])
 
-    if summary:
-        _set_field(fields, "Summary", summary)
-    if description:
-        _set_field(fields, "Description", description)
-    if priority:
-        _set_field(fields, "Priority", priority)
-
-    if additional_fields:
-        try:
-            extras = json.loads(additional_fields)
-            for label, value in extras.items():
-                _set_field(fields, label, value)
-        except json.JSONDecodeError:
-            return "Error: additional_fields must be a valid JSON string."
+    try:
+        values = json.loads(additional_fields) if additional_fields else {}
+        if not isinstance(values, dict):
+            raise ValueError("additional_fields must be a JSON object")
+        if summary:
+            values.setdefault("Summary", summary)
+        if description:
+            values.setdefault("Description", description)
+        replacements, _ = _requirement_field_payload(project_name, token, values, priority)
+        for replacement in replacements:
+            index = next((index for index, field in enumerate(fields)
+                          if field.get("label") == replacement["label"]), None)
+            if index is None:
+                fields.append(replacement)
+            else:
+                fields[index] = replacement
+    except (ValueError, TypeError) as error:
+        return f"Error: {error}"
 
     result = _request(f"{proj}/requirements/{req_id}", token, req, "PUT")
     if result.get("error"):
