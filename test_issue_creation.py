@@ -248,6 +248,69 @@ class IssueCreationTests(unittest.TestCase):
         self.assertIn("Unknown issues fields", result)
         request.assert_not_called()
 
+    def test_found_by_record_is_omitted_when_no_found_by_values_are_supplied(self):
+        definitions = [self.definitions()[0]]
+        response = {"status": 201, "data": {"issues": [{"id": 42, "fields": []}]}}
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request", return_value=response) as request:
+            server.create_issue("Demo", "API user is the creator")
+        issue = request.call_args.args[2]["issues"][0]
+        self.assertNotIn("foundByRecords", issue)
+
+    def test_complete_found_by_user_object_is_preserved(self):
+        definitions = [
+            {"label": "Summary", "editable": True, "type": "singleLineString",
+             "outputType": "string", "singleLineString": {"required": True}},
+            {"label": "Found by", "editable": True, "type": "userMenu",
+             "outputType": "user", "userMenu": {}},
+            {"label": "Description", "editable": True, "type": "multiLineString",
+             "outputType": "formattedString", "multiLineString": {}},
+        ]
+        response = {"status": 201, "data": {"issues": [{"id": 42, "fields": []}]}}
+        user = {"id": 12, "username": "joro", "firstName": "John",
+                "lastName": "de Rooij", "mi": ""}
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request", return_value=response) as request:
+            server.create_issue("Demo", "Explicit reporter",
+                                additional_fields={"Found by": user})
+        found_by = request.call_args.args[2]["issues"][0]["foundByRecords"][
+            "foundByRecordsData"][0]
+        self.assertEqual(found_by["foundBy"], user)
+
+    def test_read_only_issue_field_is_rejected_before_posting(self):
+        definitions = [{
+            "label": "Summary", "editable": True, "type": "singleLineString",
+            "outputType": "string", "singleLineString": {},
+        }, {
+            "label": "Status", "editable": False, "type": "singleLineString",
+            "outputType": "string", "singleLineString": {},
+        }]
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request") as request:
+            result = server.create_issue("Demo", "Summary",
+                                         additional_fields={"Status": "Open"})
+        self.assertIn("read-only", result)
+        request.assert_not_called()
+
+    def test_invalid_menu_value_is_rejected_before_issue_post(self):
+        definitions = [
+            {"label": "Summary", "editable": True, "type": "singleLineString",
+             "outputType": "string", "singleLineString": {"required": True}},
+            {"label": "Type", "editable": True, "type": "menu",
+             "outputType": "menuItem", "menu": {"id": 7, "required": True}},
+        ]
+        responses = [{"data": {"itemsData": [{"id": 1, "label": "Known"}]}}]
+        with patch.object(server, "_get_token", return_value="token"), \
+             patch.object(server, "_configured_fields", return_value=definitions), \
+             patch.object(server, "_request", side_effect=responses) as request:
+            result = server.create_issue("Demo", "Summary",
+                                         additional_fields={"Type": "Typo"})
+        self.assertIn("Invalid value", result)
+        self.assertEqual(request.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
