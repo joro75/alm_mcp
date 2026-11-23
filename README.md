@@ -9,7 +9,7 @@ A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that c
 ## Features
 
 - **Requirements** — list, search, create, update, delete, and trigger workflow events
-- **Issues** — list, search, read issue details, inspect attachments, and trigger workflow events
+- **Issues** — list, search, create, read issue details, inspect attachments, and trigger workflow events
 - **Attachments** — retrieve attachment metadata and download binary attachment files
 - **Test Cases** — list, search, create, read, update, and append steps; link to requirements
 - **Requirement Documents** — browse document trees, add requirements to sections, create snapshots
@@ -201,6 +201,7 @@ and description "The system must support SAML 2.0 SSO for all users."
 | Tool | Description |
 |------|-------------|
 | `list_issues` | List issues in a project (supports column selection and saved filters) |
+| `create_issue` | Create an issue using configured fields and required-field validation |
 | `get_issue` | Get full details of a single issue by tag or numeric ID |
 | `assign_issue` | Assign an issue to a user by name, username, or ID |
 | `unassign_issue` | Remove all assignees from an issue using the configured `Unassign` event (database-specific) |
@@ -208,6 +209,26 @@ and description "The system must support SAML 2.0 SSO for all users."
 | `add_issue_event` | Trigger a workflow event on an issue (e.g. `Comment`) |
 | `get_issue_workflow_events` | List the workflow events currently available for an issue |
 | `search_issues` | Full-text search across Summary and Description fields |
+
+#### Creating issues
+
+`create_issue` accepts `additional_fields` as a dictionary keyed by the exact
+configured issue-field labels. The server reads the issue-field configuration,
+encodes menu, user, formatted-string and scalar values using their API types,
+and rejects missing required fields before posting. Use
+`get_field_definitions(project_name="My Project", item_type="issues")` first
+to discover required fields and valid menu options.
+
+Example:
+
+```text
+create_issue(
+    project_name="My Project",
+    summary="Investigate failed calibration",
+    description="The calibration procedure reports an invalid result.",
+    additional_fields={"Category": "Investigation", "Severity": "Major"}
+)
+```
 
 #### Attachments
 

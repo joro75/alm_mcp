@@ -315,6 +315,22 @@ def _requirement_field_payload(project_name: str, token: str, values: dict,
              for label, value in values.items()], definitions)
 
 
+def _configured_item_field_payload(project_name: str, token: str,
+                                   item_type: str, values: dict,
+                                   priority: str = "") -> tuple[list[dict], list[dict]]:
+    """Validate and encode configured fields for a requirement-like item."""
+    definitions = _configured_fields(project_name, token, item_type)
+    by_label = {field["label"]: field for field in definitions}
+    if priority:
+        priority_label = "Priority" if "Priority" in by_label else "Importance"
+        values.setdefault(priority_label, priority)
+    unknown = set(values) - set(by_label)
+    if unknown:
+        raise ValueError(f"Unknown {item_type} fields: {sorted(unknown)}")
+    return ([_serialise_configured_field(project_name, token, by_label[label], value)
+             for label, value in values.items()], definitions)
+
+
 def _parse_int_header(value):
     """Parse an integer header value and return None when unavailable."""
     if value is None:
@@ -1486,6 +1502,78 @@ def get_issue(project_name: str = "", issue_identifier: str = "") -> str:
         summary["linked_items"] = formatted_links
 
     return json.dumps(summary, indent=2)
+
+
+@mcp.tool()
+def create_issue(project_name: str = "", summary: str = "", description: str = "",
+                 priority: str = "",
+                 additional_fields: dict[str, Any] | None = None) -> str:
+    """Create a new issue in a Helix ALM project.
+
+    The issue fields are read from the project's issue-field configuration. Use
+    get_field_definitions with item_type="issues" before creating an issue so
+    required fields and valid menu values are known.
+
+    Args:
+        project_name: Name of the Helix ALM project. Uses the default project if not specified.
+        summary: Issue summary/title.
+        description: Detailed issue description.
+        priority: Configured Priority or Importance value; use get_field_values first.
+        additional_fields: Dictionary of exact issue field labels and values.
+            Menu fields accept labels or IDs, user fields accept usernames or
+            user objects, and multi-select fields accept arrays.
+    """
+    project_name = _resolve_project(project_name)
+    if not project_name:
+        return _no_project_msg()
+    if additional_fields is not None and not isinstance(additional_fields, dict):
+        return "Error: additional_fields must be a dictionary."
+    token = _get_token(project_name)
+    if not token:
+        return (_helix_not_configured_msg() if not _helix_configured()
+                else f"Error: Could not get access token for project '{project_name}'.")
+
+    values = dict(additional_fields or {})
+    values.setdefault("Summary", summary)
+    if description:
+        values.setdefault("Description", description)
+    try:
+        fields, definitions = _configured_item_field_payload(
+            project_name, token, "issues", values, priority)
+        missing = []
+        for field in definitions:
+            settings = field.get(field["type"], {})
+            if (field.get("editable") and settings.get("required")
+                    and not settings.get("defaultValue")
+                    and (values.get(field["label"]) is None
+                         or values.get(field["label"]) == "")):
+                missing.append(field["label"])
+        if missing:
+            raise ValueError(f"Required fields without defaults: {missing}")
+    except (ValueError, TypeError) as error:
+        return f"Error: {error}"
+
+    body = {"fields": fields}
+    result = _request(f"{_encode_project(project_name)}/issues", token,
+                      {"issues": [body]}, "POST")
+    data = result.get("data", {})
+    if result.get("error") or (isinstance(data, dict) and data.get("errors")):
+        errors = data.get("errors", []) if isinstance(data, dict) else []
+        created = data.get("issues", []) if isinstance(data, dict) else []
+        if created:
+            return json.dumps({
+                "message": "Issue created with warnings",
+                "issue": _format_issue(created[0]),
+                "warnings": errors,
+            }, indent=2)
+        return _friendly_error(result, "create the issue")
+
+    created_list = data.get("issues", []) if isinstance(data, dict) else []
+    created = created_list[0] if created_list else data
+    return json.dumps({
+        "message": "Issue created successfully",
+        "issue": _format_issue(created) if created else {},
+    }, indent=2)
 
 
 @mcp.tool()
