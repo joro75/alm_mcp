@@ -94,12 +94,12 @@ class RequirementCreationPayloadTests(unittest.TestCase):
             },
         )
         self.assertEqual(
-            server._build_requirement_field("Source", "joro", field_types),
-            {"label": "Source", "type": "user", "user": {"username": "joro"}},
+            server._build_requirement_field("Source", "testuser", field_types),
+            {"label": "Source", "type": "user", "user": {"username": "testuser"}},
         )
         self.assertEqual(
-            server._build_requirement_field("Owners", [{"username": "joro"}], field_types),
-            {"label": "Owners", "type": "userArray", "userArray": [{"username": "joro"}]},
+            server._build_requirement_field("Owners", [{"username": "testuser"}], field_types),
+            {"label": "Owners", "type": "userArray", "userArray": [{"username": "testuser"}]},
         )
         self.assertEqual(
             server._build_requirement_field("Story Points", 3, field_types),

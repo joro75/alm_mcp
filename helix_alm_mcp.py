@@ -2114,6 +2114,19 @@ def add_issue_event(project_name: str = "", issue_identifier: str = "",
             return f"Error: additional_fields['{label}'] has a mismatched label."
         if not field.get("type"):
             return f"Error: additional_fields['{label}'] requires a type."
+        value_key_by_type = {
+            "menuItem": "menuItem",
+            "menuItemArray": "menuItems",
+            "user": "user",
+            "userArray": "users",
+            "date": "date",
+            "dateTime": "dateTime",
+            "string": "string",
+            "formattedString": "formattedString",
+        }
+        value_key = value_key_by_type.get(field["type"])
+        if value_key and value_key not in field:
+            return f"Error: additional_fields['{label}'] requires '{value_key}'."
         fields.append({"label": label, **field})
 
     if notes:

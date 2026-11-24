@@ -19,11 +19,11 @@ class AssignmentTests(unittest.TestCase):
             {"status": 200, "data": {"accessToken": "token"}},
             {"status": 200, "data": {"issues": []}},
             {"status": 200, "data": {"id": 42}},
-            {"status": 200, "data": {"fields": [{"label": "Currently Assigned To", "userArray": [{"id": 12, "firstName": "John", "lastName": "de Rooij", "username": "joro"}]}]}},
+            {"status": 200, "data": {"fields": [{"label": "Currently Assigned To", "userArray": [{"id": 12, "firstName": "Test", "lastName": "User", "username": "testuser"}]}]}},
             {"status": 200, "data": {"eventsData": [{"name": "Assign"}]}},
         ]
         with patch.object(server, "_request", side_effect=responses) as request:
-            result = json.loads(server.assign_issue("", "42", "John de Rooij", "Please investigate"))
+            result = json.loads(server.assign_issue("", "42", "Test User", "Please investigate"))
         self.assertEqual(result["assignee"]["id"], 12)
         payload = request.call_args_list[4].args[2]
         self.assertEqual(payload["eventsData"][0]["name"], "Assign")

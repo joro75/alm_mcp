@@ -119,13 +119,13 @@ class IssueCreationTests(unittest.TestCase):
             server.create_issue("Demo", "Summary", "Description",
                                 additional_fields={
                                     "Version Found": "3.3.x",
-                                    "Found by": {"username": "joro"},
+                                    "Found by": {"username": "testuser"},
                                 })
         issue = request.call_args.args[2]["issues"][0]
         self.assertNotIn("Description", [f["label"] for f in issue["fields"]])
         found_by = issue["foundByRecords"]["foundByRecordsData"][0]
         self.assertEqual(found_by["versionFound"], "3.3.x")
-        self.assertEqual(found_by["foundBy"], {"username": "joro"})
+        self.assertEqual(found_by["foundBy"], {"username": "testuser"})
         self.assertEqual(found_by["description"]["text"], "Description")
 
     def test_all_found_by_properties_are_split_and_encoded(self):
@@ -150,7 +150,7 @@ class IssueCreationTests(unittest.TestCase):
             {"status": 201, "data": {"issues": [{"id": 42, "tag": "#-42", "fields": []}]}},
         ]
         values = {
-            "Found by": {"username": "joro"},
+            "Found by": {"username": "testuser"},
             "Date Found": "2026-11-23",
             "Version Found": "3.3.x",
             "Description": "<p>HTML description</p>",
@@ -164,7 +164,7 @@ class IssueCreationTests(unittest.TestCase):
         issue = request.call_args.args[2]["issues"][0]
         self.assertEqual([f["label"] for f in issue["fields"]], ["Summary"])
         found_by = issue["foundByRecords"]["foundByRecordsData"][0]
-        self.assertEqual(found_by["foundBy"], {"username": "joro"})
+        self.assertEqual(found_by["foundBy"], {"username": "testuser"})
         self.assertEqual(found_by["dateFound"], "2026-11-23")
         self.assertEqual(found_by["versionFound"], "3.3.x")
         self.assertTrue(found_by["description"]["isFormatted"])
@@ -268,8 +268,8 @@ class IssueCreationTests(unittest.TestCase):
              "outputType": "formattedString", "multiLineString": {}},
         ]
         response = {"status": 201, "data": {"issues": [{"id": 42, "fields": []}]}}
-        user = {"id": 12, "username": "joro", "firstName": "John",
-                "lastName": "de Rooij", "mi": ""}
+        user = {"id": 12, "username": "testuser", "firstName": "Test",
+                "lastName": "User", "mi": ""}
         with patch.object(server, "_get_token", return_value="token"), \
              patch.object(server, "_configured_fields", return_value=definitions), \
              patch.object(server, "_request", return_value=response) as request:
