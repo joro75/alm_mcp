@@ -2077,18 +2077,50 @@ def add_requirement_event(project_name: str = "", requirement_identifier: str = 
 
 @mcp.tool()
 def add_issue_event(project_name: str = "", issue_identifier: str = "",
-                    event_name: str = "", notes: str = "") -> str:
-    """Add a workflow event to an issue (e.g. Comment).
+                    event_name: str = "", notes: str = "",
+                    additional_fields: dict[str, dict[str, Any]] | None = None) -> str:
+    """Add a workflow event to an issue (e.g. Comment or Release to customer).
+
+    ``additional_fields`` contains typed Helix event fields keyed by their exact
+    labels. Each value must contain ``type`` and the matching API value property,
+    for example ``{"type": "menuItem", "menuItem": {"label": "Beta release"}}``.
+    This allows event-specific optional and required fields while retaining the
+    convenient ``notes`` argument for ordinary comment events.
 
     Args:
         project_name: Name of the Helix ALM project. Uses the default project if not specified.
         issue_identifier: The issue tag (e.g. 'IS-1960') or numeric ID.
-        event_name: The workflow event name (e.g. "Comment").
-        notes: Optional notes/comments for the event.
+        event_name: The workflow event name (e.g. "Comment" or "Release to customer").
+        notes: Optional notes/comments for the event. Added as the Notes field.
+        additional_fields: Optional dictionary of exact field labels to typed
+            Helix field dictionaries. Do not include Notes here when using notes.
+            For example, Release to customer can use Release as a menuItem,
+            Release to customer testing by as a user, Date as dateTime, and
+            Version as string.
     """
     project_name = _resolve_project(project_name)
     if not project_name:
         return _no_project_msg()
+    if additional_fields is not None and not isinstance(additional_fields, dict):
+        return "Error: additional_fields must be a dictionary."
+
+    fields = []
+    for label, field in (additional_fields or {}).items():
+        if not isinstance(label, str) or not label:
+            return "Error: additional_fields labels must be non-empty strings."
+        if not isinstance(field, dict):
+            return f"Error: additional_fields['{label}'] must be a field dictionary."
+        if field.get("label", label) != label:
+            return f"Error: additional_fields['{label}'] has a mismatched label."
+        if not field.get("type"):
+            return f"Error: additional_fields['{label}'] requires a type."
+        fields.append({"label": label, **field})
+
+    if notes:
+        if "Notes" in (additional_fields or {}):
+            return "Error: provide Notes either through notes or additional_fields, not both."
+        fields.append({"label": "Notes", "type": "string", "string": notes})
+
     token = _get_token(project_name)
     if not token:
         return _helix_not_configured_msg() if not _helix_configured() else f"Error: Could not get access token for project '{project_name}'."
@@ -2098,19 +2130,7 @@ def add_issue_event(project_name: str = "", issue_identifier: str = "",
         return f"Error: Could not find issue '{issue_identifier}'."
 
     proj = _encode_project(project_name)
-    event_data = {
-        "eventsData": [{
-            "name": event_name,
-            "fields": [],
-        }]
-    }
-    if notes:
-        event_data["eventsData"][0]["fields"].append({
-            "label": "Notes",
-            "type": "string",
-            "string": notes,
-        })
-
+    event_data = {"eventsData": [{"name": event_name, "fields": fields}]}
     result = _request(f"{proj}/issues/{issue_id}/events", token, event_data, "POST")
     if result.get("error"):
         return _friendly_error(result, f"add event '{event_name}' to the issue")
