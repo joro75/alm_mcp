@@ -903,8 +903,21 @@ def _find_users(value, identifier: str) -> list[dict]:
     return found
 
 
-def _resolve_user(project_name: str, token: str, item_path: str, identifier: str) -> dict | None:
-    """Resolve an assignee from the target item's fields and event history."""
+def _resolve_user(project_name: str, token: str, item_path: str,
+                 identifier: str | dict) -> dict | None:
+    """Resolve an assignee from the item, or validate a complete user object.
+
+    Helix ALM does not expose a generally usable user-list resource in the
+    configured API. Callers that already obtained a user reference from a
+    trusted Helix response may therefore supply the complete object directly.
+    """
+    if isinstance(identifier, dict):
+        required = ("id", "firstName", "lastName", "username")
+        if all(key in identifier for key in required):
+            return {key: identifier[key] for key in required}
+        return None
+    if not isinstance(identifier, str):
+        return None
     result = _request(f"{item_path}?expand=events", token)
     if result.get("error"):
         return None
@@ -2118,7 +2131,7 @@ def add_issue_event(project_name: str = "", issue_identifier: str = "",
             "menuItem": "menuItem",
             "menuItemArray": "menuItems",
             "user": "user",
-            "userArray": "users",
+            "userArray": "userArray",
             "date": "date",
             "dateTime": "dateTime",
             "string": "string",
@@ -2156,7 +2169,7 @@ def add_issue_event(project_name: str = "", issue_identifier: str = "",
 
 @mcp.tool()
 def assign_issue(project_name: str = "", issue_identifier: str = "",
-                  assignee: str = "", notes: str = "") -> str:
+                  assignee: str | dict = "", notes: str = "") -> str:
     """Assign an issue to a Helix user by username, full name, or user ID.
 
     The user record is resolved from the target item's returned user references.
@@ -2185,7 +2198,7 @@ def assign_issue(project_name: str = "", issue_identifier: str = "",
 
 @mcp.tool()
 def assign_requirement(project_name: str = "", requirement_identifier: str = "",
-                         assignee: str = "", notes: str = "") -> str:
+                         assignee: str | dict = "", notes: str = "") -> str:
     """Assign a requirement to a Helix user by username, full name, or user ID."""
     project_name = _resolve_project(project_name)
     if not project_name:
@@ -2210,7 +2223,7 @@ def assign_requirement(project_name: str = "", requirement_identifier: str = "",
 
 @mcp.tool()
 def assign_test_case(project_name: str = "", test_case_identifier: str = "",
-                      assignee: str = "", notes: str = "") -> str:
+                      assignee: str | dict = "", notes: str = "") -> str:
     """Assign a test case to a Helix user by username, full name, or user ID."""
     project_name = _resolve_project(project_name)
     if not project_name:
